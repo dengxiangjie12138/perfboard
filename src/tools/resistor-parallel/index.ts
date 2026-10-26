@@ -1,0 +1,1 @@
+export { ResistorParallelPage } from './ResistorParallelPage';

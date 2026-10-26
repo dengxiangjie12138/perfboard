@@ -1,0 +1,13 @@
+import './bootstrap';
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+import { ReminderAttention } from './features/standing-reminder/ReminderAttention';
+import { ToolWindowApp } from './windows/ToolWindowApp';
+import {DataProvider} from './state/DataContext';
+import { ExternalToolsProvider } from './tools/external-tools';
+import './styles.css';
+import { ClipboardMenu } from './components/ClipboardMenu';
+const reminderWindow = ['#reminder-attention', '#reminder-attention-backdrop', '#fitness-prompt', '#standing-reminder-prompt'].includes(location.hash);
+if (reminderWindow) document.documentElement.dataset.reminderAttention = 'true';
+ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode>{reminderWindow ? <ReminderAttention backdrop={location.hash === '#reminder-attention-backdrop'}/> : <DataProvider><ClipboardMenu/><ExternalToolsProvider>{(location.hash.startsWith('#window=') || location.hash.startsWith('#tool=')) ? <ToolWindowApp/> : <App/>}</ExternalToolsProvider></DataProvider>}</React.StrictMode>);

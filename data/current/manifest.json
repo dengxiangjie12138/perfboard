@@ -1,0 +1,232 @@
+{
+  "format": "perfboard-current-data-snapshot",
+  "format_version": 1,
+  "created_at": "2026-10-26T17:09:36.312535+00:00",
+  "snapshot_consistency": "Each database is a complete read-only SQLite backup from one read transaction; separate databases are captured sequentially.",
+  "logical_digest": "SHA256 of column names plus sorted, length-prefixed typed-row SHA256 digests; BLOBs contribute their byte length and SHA256. Duplicate rows are retained.",
+  "excluded": [
+    "repository/backups/",
+    "historical import backups",
+    "SQLite WAL/SHM sidecars",
+    "repository.json"
+  ],
+  "files": {
+    "repository/perfboard.sqlite3": {
+      "kind": "sqlite",
+      "bytes": 7938048,
+      "sha256": "e6412e5610deb19a9f23a1b070b8722d9ef87394c8b214565f05576e72306d77",
+      "database": {
+        "user_version": 6,
+        "application_id": 1346781764,
+        "schema_sha256": "0a645953558e58ad1ffe2680fe1c8ad9103d79e175a94721358c59617f25833b",
+        "tables": {
+          "attachments": {
+            "rows": 0,
+            "logical_sha256": "159a65efe38a2b368d9d6d97e214f590f8cd6c075dd2f0c7398fdf99a2c0d655",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "dev_log_folders": {
+            "rows": 3,
+            "logical_sha256": "d7406809537ef898f8781275bffd6e0452abbc462aeb27cbbf261f78bbb7402c",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "dev_log_page_folders": {
+            "rows": 5,
+            "logical_sha256": "a9b2505e6303c552c2f5f7e2b69819cd52543a1b8c08f77fafa05d0f24883642",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "dev_log_page_history": {
+            "rows": 163,
+            "logical_sha256": "cb4ee23d37cef4471d8fe5f55d586b9dfa7d5c6973a79ecd6d15f74f5407d9a2",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "dev_log_pages": {
+            "rows": 22,
+            "logical_sha256": "af817228737276fe55d49ceca4eedf162bc7e387e5149b2c95d67ccc285b9c2e",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "dev_log_projects": {
+            "rows": 8,
+            "logical_sha256": "692d97d433382f754c938b691644243246a49d28761de5a38dd51dadc40e44ff",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "dev_log_resources": {
+            "rows": 5,
+            "logical_sha256": "a1604c36c184a9abfaa42cf75c78ae1304577db56adff6dfde78afb6fd92e180",
+            "blob_cells": 5,
+            "blob_bytes": 4482266,
+            "blob_sha256": "8fe1b711f4734a7eae0d88e3bfc3a0bbc3a46b70a80433f0018511db0d422c8c"
+          },
+          "external_tools": {
+            "rows": 3,
+            "logical_sha256": "803298666e6ff6e7c5133ca4c69606a2e4d12d122dbdfe36fee1a29eb4a5d1e4",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "notes": {
+            "rows": 4,
+            "logical_sha256": "e95c9b4f97542aec81ac00ee5390b86eecf51d9177e3a8e7796fc6bd714c436e",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "parts": {
+            "rows": 1918,
+            "logical_sha256": "6f3698522be3889fc68f0dd8977c9cb6355ea0e467d61cac7699324492444012",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "settings": {
+            "rows": 3,
+            "logical_sha256": "546e345f19759a624f563794da7fb91d5a4a866fb19260f3e30cc5f4d845d2b1",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "transformer_design_history": {
+            "rows": 12,
+            "logical_sha256": "89a2090d3a99c1181e30bb955b0a2777952a67d38d3b3683cdecae0895edb0f1",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "transformer_designs": {
+            "rows": 3,
+            "logical_sha256": "b47e47412ba4791768570dc32115bcdc64e098dacdc008d4107744a33b2987de",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "log_resources": {
+          "rows": 5,
+          "bytes": 4482266,
+          "sha256": "8fe1b711f4734a7eae0d88e3bfc3a0bbc3a46b70a80433f0018511db0d422c8c"
+        },
+        "integrity_check": "ok"
+      },
+      "source_observation": {
+        "opened_read_only": true,
+        "consistent_read_transaction": true,
+        "database_bytes_unchanged": true,
+        "wal_bytes_unchanged": true
+      }
+    },
+    "settings/activity-log.sqlite": {
+      "kind": "sqlite",
+      "bytes": 344064,
+      "sha256": "2af1a8d5ffef2d9ac1c190279a44400944a7cf90fbbdfa551d85ead167845e79",
+      "database": {
+        "user_version": 1,
+        "application_id": 0,
+        "schema_sha256": "04a954b16238d17515bbd2370127914adf684f85ca7c1041b22b7c79bddaf7d6",
+        "tables": {
+          "activity_segments": {
+            "rows": 1166,
+            "logical_sha256": "fd7707c65df16c06611e5852cdd77c2302e45f17bd4ff1862189adea6d3434c6",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "integrity_check": "ok"
+      },
+      "source_observation": {
+        "opened_read_only": true,
+        "consistent_read_transaction": true,
+        "database_bytes_unchanged": true,
+        "wal_bytes_unchanged": true
+      }
+    },
+    "settings/external-tools-warehouse-import.json": {
+      "kind": "tool_configuration",
+      "bytes": 131,
+      "sha256": "bfb214ce2991f6052e5cc316396c83fb9a8d2b8904ec44f54bd98c23aae4b18f"
+    },
+    "settings/external-tools.json": {
+      "kind": "tool_configuration",
+      "bytes": 544,
+      "sha256": "67fbbc0256575ce5fc71ce7608af742da9f51b3bb62224ce47bee5fbb35c6402"
+    },
+    "settings/standing-reminder.sqlite": {
+      "kind": "sqlite",
+      "bytes": 57344,
+      "sha256": "d051268cd530c36c2c8a8c078c7d2bfdcd36521b7c97a116488c258179722ecb",
+      "database": {
+        "user_version": 0,
+        "application_id": 0,
+        "schema_sha256": "1b36d01aa475e9901ff124fe25bf0930e520b0109091d84ff3d76f80ce947393",
+        "tables": {
+          "fitness_state": {
+            "rows": 1,
+            "logical_sha256": "84545e90c00911b1c0c3b0fd2940d015ca63d86e1dca724e4e28ae513de01344",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "reminder_attention_settings": {
+            "rows": 0,
+            "logical_sha256": "19cbd6d0bbcb0ac2868369ebb930b2341269538e3cdd1eb1a527477405a1b25f",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "reminder_state": {
+            "rows": 1,
+            "logical_sha256": "f03826aebcaa16ba7c3cce8f4ab6a6a13e27c4e0a74fe88f8daf2a0b6b3d8739",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "integrity_check": "ok"
+      },
+      "source_observation": {
+        "opened_read_only": true,
+        "consistent_read_transaction": true,
+        "database_bytes_unchanged": true,
+        "wal_bytes_unchanged": true
+      }
+    },
+    "settings/view-state.sqlite3": {
+      "kind": "sqlite",
+      "bytes": 12288,
+      "sha256": "671a9af27807792f77b791f9a8c6fc55d051f8dc71696379e9901cb7a57fec29",
+      "database": {
+        "user_version": 1,
+        "application_id": 1346524755,
+        "schema_sha256": "c63e7d4f2f6aee7d77e842d6a20941ad186107c1d07595ed48ccc15070a1779e",
+        "tables": {
+          "view_selections": {
+            "rows": 2,
+            "logical_sha256": "6e160ba0a33516471b572e585df5e6bfd9f964064f12593d416c65d7184a9510",
+            "blob_cells": 0,
+            "blob_bytes": 0,
+            "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "integrity_check": "ok"
+      },
+      "source_observation": {
+        "opened_read_only": true,
+        "consistent_read_transaction": true,
+        "database_bytes_unchanged": true,
+        "wal_bytes_unchanged": true
+      }
+    }
+  }
+}

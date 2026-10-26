@@ -1,0 +1,1 @@
+export { PmosSwitchPage } from './PmosSwitchPage';

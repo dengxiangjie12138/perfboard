@@ -1,0 +1,308 @@
+{
+  "source": "https://www.liuwenhao.me/?p=5554",
+  "sourceHtmlSha256": "78423cd66981653e019a1963774ef4b22f3ffa159002d416884b2a9ce18ca6f8",
+  "retrievedDate": "2026-10-02",
+  "columns": "Only the original conservative, normal and maximum current values in amperes; geometry is calculated independently.",
+  "rows": [
+    {
+      "n": -3,
+      "conservative": 302.286,
+      "normal": 423.2,
+      "maximum": 482.566
+    },
+    {
+      "n": -2,
+      "conservative": 239.675,
+      "normal": 335.544,
+      "maximum": 382.614
+    },
+    {
+      "n": -1,
+      "conservative": 190.113,
+      "normal": 266.158,
+      "maximum": 303.495
+    },
+    {
+      "n": 0,
+      "conservative": 150.8,
+      "normal": 211.12,
+      "maximum": 240.736
+    },
+    {
+      "n": 1,
+      "conservative": 119.564,
+      "normal": 167.389,
+      "maximum": 190.87
+    },
+    {
+      "n": 2,
+      "conservative": 94.797,
+      "normal": 132.716,
+      "maximum": 151.333
+    },
+    {
+      "n": 3,
+      "conservative": 75.178,
+      "normal": 105.249,
+      "maximum": 120.013
+    },
+    {
+      "n": 4,
+      "conservative": 59.626,
+      "normal": 83.477,
+      "maximum": 95.187
+    },
+    {
+      "n": 5,
+      "conservative": 47.268,
+      "normal": 66.175,
+      "maximum": 75.458
+    },
+    {
+      "n": 6,
+      "conservative": 37.491,
+      "normal": 52.488,
+      "maximum": 59.851
+    },
+    {
+      "n": 7,
+      "conservative": 29.746,
+      "normal": 41.645,
+      "maximum": 47.487
+    },
+    {
+      "n": 8,
+      "conservative": 23.589,
+      "normal": 33.025,
+      "maximum": 37.657
+    },
+    {
+      "n": 9,
+      "conservative": 18.696,
+      "normal": 26.175,
+      "maximum": 29.846
+    },
+    {
+      "n": 10,
+      "conservative": 14.834,
+      "normal": 20.767,
+      "maximum": 23.68
+    },
+    {
+      "n": 11,
+      "conservative": 11.752,
+      "normal": 16.453,
+      "maximum": 18.761
+    },
+    {
+      "n": 12,
+      "conservative": 9.327,
+      "normal": 13.057,
+      "maximum": 14.889
+    },
+    {
+      "n": 13,
+      "conservative": 7.406,
+      "normal": 10.368,
+      "maximum": 11.822
+    },
+    {
+      "n": 14,
+      "conservative": 5.87,
+      "normal": 8.218,
+      "maximum": 9.37
+    },
+    {
+      "n": 15,
+      "conservative": 4.658,
+      "normal": 6.521,
+      "maximum": 7.436
+    },
+    {
+      "n": 16,
+      "conservative": 3.687,
+      "normal": 5.161,
+      "maximum": 5.885
+    },
+    {
+      "n": 17,
+      "conservative": 2.932,
+      "normal": 4.104,
+      "maximum": 4.68
+    },
+    {
+      "n": 18,
+      "conservative": 2.32,
+      "normal": 3.248,
+      "maximum": 3.704
+    },
+    {
+      "n": 19,
+      "conservative": 1.841,
+      "normal": 2.578,
+      "maximum": 2.939
+    },
+    {
+      "n": 20,
+      "conservative": 1.463,
+      "normal": 2.048,
+      "maximum": 2.335
+    },
+    {
+      "n": 21,
+      "conservative": 1.16,
+      "normal": 1.625,
+      "maximum": 1.852
+    },
+    {
+      "n": 22,
+      "conservative": 0.914,
+      "normal": 1.28,
+      "maximum": 1.46
+    },
+    {
+      "n": 23,
+      "conservative": 0.73,
+      "normal": 1.022,
+      "maximum": 1.165
+    },
+    {
+      "n": 24,
+      "conservative": 0.577,
+      "normal": 0.808,
+      "maximum": 0.921
+    },
+    {
+      "n": 25,
+      "conservative": 0.458,
+      "normal": 0.641,
+      "maximum": 0.731
+    },
+    {
+      "n": 26,
+      "conservative": 0.361,
+      "normal": 0.506,
+      "maximum": 0.577
+    },
+    {
+      "n": 27,
+      "conservative": 0.288,
+      "normal": 0.403,
+      "maximum": 0.46
+    },
+    {
+      "n": 28,
+      "conservative": 0.227,
+      "normal": 0.318,
+      "maximum": 0.362
+    },
+    {
+      "n": 29,
+      "conservative": 0.182,
+      "normal": 0.255,
+      "maximum": 0.291
+    },
+    {
+      "n": 30,
+      "conservative": 0.143,
+      "normal": 0.2,
+      "maximum": 0.228
+    },
+    {
+      "n": 31,
+      "conservative": 0.113,
+      "normal": 0.158,
+      "maximum": 0.181
+    },
+    {
+      "n": 32,
+      "conservative": 0.091,
+      "normal": 0.128,
+      "maximum": 0.146
+    },
+    {
+      "n": 33,
+      "conservative": 0.072,
+      "normal": 0.101,
+      "maximum": 0.115
+    },
+    {
+      "n": 34,
+      "conservative": 0.057,
+      "normal": 0.079,
+      "maximum": 0.091
+    },
+    {
+      "n": 35,
+      "conservative": 0.045,
+      "normal": 0.063,
+      "maximum": 0.072
+    },
+    {
+      "n": 36,
+      "conservative": 0.036,
+      "normal": 0.05,
+      "maximum": 0.057
+    },
+    {
+      "n": 37,
+      "conservative": 0.029,
+      "normal": 0.041,
+      "maximum": 0.046
+    },
+    {
+      "n": 38,
+      "conservative": 0.023,
+      "normal": 0.032,
+      "maximum": 0.036
+    },
+    {
+      "n": 39,
+      "conservative": 0.018,
+      "normal": 0.025,
+      "maximum": 0.028
+    },
+    {
+      "n": 40,
+      "conservative": 0.014,
+      "normal": 0.019,
+      "maximum": 0.022
+    },
+    {
+      "n": 41,
+      "conservative": 0.011,
+      "normal": 0.016,
+      "maximum": 0.018
+    },
+    {
+      "n": 42,
+      "conservative": 0.009,
+      "normal": 0.013,
+      "maximum": 0.014
+    },
+    {
+      "n": 43,
+      "conservative": 0.007,
+      "normal": 0.01,
+      "maximum": 0.011
+    },
+    {
+      "n": 44,
+      "conservative": 0.006,
+      "normal": 0.008,
+      "maximum": 0.009
+    },
+    {
+      "n": 45,
+      "conservative": 0.005,
+      "normal": 0.006,
+      "maximum": 0.007
+    },
+    {
+      "n": 46,
+      "conservative": 0.004,
+      "normal": 0.005,
+      "maximum": 0.006
+    }
+  ]
+}

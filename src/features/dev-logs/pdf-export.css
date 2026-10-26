@@ -1,0 +1,28 @@
+@page { size: A4 portrait; margin: 16mm; }
+* { box-sizing: border-box; }
+html { color-scheme: light; background: #fff; }
+body { margin: 0; color: #202020; background: #fff; font: 11pt/1.65 "Microsoft YaHei", "Noto Sans CJK SC", "PingFang SC", "SimSun", sans-serif; overflow-wrap: anywhere; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+article { width: 100%; }
+.project-title { color: #666; font-size: 9pt; margin-bottom: 3mm; }
+.document-title { margin: 0 0 7mm; padding-bottom: 3mm; border-bottom: 1px solid #ddd; font-size: 22pt; }
+h1, h2, h3, h4, h5, h6 { line-height: 1.4; margin: 5mm 0 2mm; break-after: avoid; break-inside: avoid; }
+h1 { font-size: 20pt; } h2 { font-size: 17pt; } h3 { font-size: 14pt; } h4, h5, h6 { font-size: 12pt; }
+p { margin: 0 0 2.5mm; orphans: 3; widows: 3; white-space: pre-wrap; }
+ul, ol { margin: 2mm 0 3mm; padding-left: 7mm; }
+li > p { margin-bottom: 1mm; }
+li > ul, li > ol { margin-top: 1mm; }
+blockquote { margin: 3mm 0; padding: 1mm 0 1mm 4mm; border-left: 3px solid #bbb; color: #555; }
+pre { margin: 3mm 0; padding: 3mm; border: 1px solid #ddd; background: #f5f5f5; white-space: pre-wrap; overflow-wrap: anywhere; break-inside: auto; orphans: 3; widows: 3; }
+code { font-family: Consolas, "Microsoft YaHei", monospace; font-size: .9em; }
+p code { padding: .2mm 1mm; background: #f2f2f2; }
+a { color: #185d9a; text-decoration: underline; }
+hr { border: 0; border-top: 1px solid #ccc; margin: 5mm 0; }
+figure { margin: 4mm 0; break-inside: avoid; }
+figure img { display: block; max-width: 100%; height: auto; }
+figcaption { margin-top: 1.5mm; color: #666; font-size: 8pt; line-height: 1.4; }
+.file-attachment { margin: 3mm 0; padding: 3mm; border: 1px solid #ddd; break-inside: avoid; }
+.file-attachment small { color: #666; }
+.task-list { padding-left: 0; list-style: none; }
+.task-item { position: relative; padding-left: 6mm; }
+.task-check { position: absolute; top: 1.3mm; left: 0; width: 3.4mm; height: 3.4mm; border: 1px solid #666; border-radius: .5mm; }
+.task-check.checked::after { content: ''; position: absolute; top: .2mm; left: 1mm; width: 1mm; height: 2mm; border: solid #333; border-width: 0 .4mm .4mm 0; transform: rotate(45deg); }

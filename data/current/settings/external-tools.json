@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "tools": [
+    {
+      "id": "a7c4aefa-17e3-4c5a-a70c-a1918e4b33ea",
+      "name": "SecureFX",
+      "path": "D:\\工具合集\\软件设计常用工具\\SecureCRT+SecureFX_9.2.3_x64_绿色汉化版-20250613\\SecureCRT.exe",
+      "description": "串口调试，SHELL调试，SSH"
+    },
+    {
+      "id": "178fcb83-f16e-4e97-8609-d5a3ce69b908",
+      "name": "Modbus Poll",
+      "path": "C:\\Program Files\\Modbus Tools\\Modbus Poll\\mbpoll.exe",
+      "description": "modbus polll，poll，modbus模拟主机"
+    }
+  ]
+}

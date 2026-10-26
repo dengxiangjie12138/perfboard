@@ -1,0 +1,3 @@
+.row-limited-table{overflow:auto;max-height:840px;scrollbar-gutter:stable}
+.row-limited-table thead th{position:sticky;top:0;z-index:1;background:var(--wash)}
+.row-limited-table:focus-visible{outline:2px solid var(--accent);outline-offset:2px}

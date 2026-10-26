@@ -1,0 +1,1 @@
+export function TimerWave() { return <svg className="calc-wave" viewBox="0 0 460 85" role="img" aria-label="示意时间轴上三个等间距更新事件"><path d="M15 45H445M35 25V65M175 25V65M315 25V65" /><text x="28" y="80">0</text><text x="161" y="80">T</text><text x="299" y="80">2T</text><text x="185" y="17">T = 更新周期</text></svg>; }

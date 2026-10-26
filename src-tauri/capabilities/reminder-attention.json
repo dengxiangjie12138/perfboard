@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "reminder-attention",
+  "description": "Native-created reminder attention overlays. Only event subscriptions; backend commands validate window labels and reminder generations.",
+  "windows": ["reminder-attention-*"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

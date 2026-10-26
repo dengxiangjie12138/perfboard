@@ -1,0 +1,21 @@
+Noto Sans SC Regular — verified static TrueType font
+
+Official source: https://github.com/google/fonts/tree/main/ofl/notosanssc
+Original variable font URL: https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf
+Original variable font SHA-256: a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da
+Original variable font size: 17,772,300 bytes
+Static derivation: fontTools 4.60.1, wght=400; no fvar remains.
+Static file: NotoSansSC-Regular.ttf
+Static size: 10,595,948 bytes
+Static SHA-256: cbce8ae931f087c07dfbd9bf94ac6e498efc5c2462c7541a17433b26143e6cb9
+License: SIL Open Font License 1.1; complete upstream OFL-NotoSansSC.txt accompanies the font.
+License SHA-256: 1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9
+Prepared and verified: 2026-10-07
+
+PDF embedding must use subset:false. Actual PyMuPDF pixel rendering verified the full
+static TrueType font's Chinese, numbers, and electrical labels. Both OTF embedding
+modes and subsetted TTF were rejected after actual pixel checks.
+Export reads this bundled font and needs no installed system font or internet access.
+
+Engineering text disables glyph substitution features (liga/kern/locl/ccmp/frac/numr/dnom).
+This preserves literal identifiers and numerals in the PDF Unicode map as well as pixels.

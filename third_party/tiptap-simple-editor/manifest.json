@@ -1,0 +1,712 @@
+{
+  "repository": "https://github.com/ueberdosis/tiptap-ui-components",
+  "commit": "799929bea4804c73767562b69f8acc2acdb8ac86",
+  "license": "MIT",
+  "files": [
+    {
+      "path": "apps/web/src/components/tiptap-icons/align-center-icon.tsx",
+      "sha256": "ccee3ebd82246f8ed14fbcb80a036d1bbecd4efa69eea87dfe194824b7e78b0b",
+      "bytes": 1164
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/align-justify-icon.tsx",
+      "sha256": "1165a7af5f4302f67875c43184228bbc880feb89b729671cf5b405c9eefa20f5",
+      "bytes": 1167
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/align-left-icon.tsx",
+      "sha256": "b39eacd287ad5e7a618e1aa9325b23f2af88922e23826428bd2d8827c72c5e3d",
+      "bytes": 1158
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/align-right-icon.tsx",
+      "sha256": "66f63ee4ecdb53809450c0bc75742d42f5a33bb9c1671e63ccedb1a2f7d221eb",
+      "bytes": 1161
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/arrow-left-icon.tsx",
+      "sha256": "8c2a2ff27b91cc95c336302f2ba26eca7083272cae6e8670e8b1d3fe11cb9569",
+      "bytes": 885
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/ban-icon.tsx",
+      "sha256": "712c818e794d45dccb805dba1dc51ae39af79286386b7a8a090784a7128e5cda",
+      "bytes": 1204
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/blockquote-icon.tsx",
+      "sha256": "512d1691842569dceadc0a05fe51287fd8e7a6d4ae308ea244a48577c5296089",
+      "bytes": 1403
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/bold-icon.tsx",
+      "sha256": "5868e3752096cd7d4ea2db67b1ce5867bd5627e52d888c3921b2573c2e33a8aa",
+      "bytes": 1265
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/chevron-down-icon.tsx",
+      "sha256": "4dfa9de5e2a56d6d3b69f88e06df8d7307ebb1fdc4ae982edf9c422e48a81c50",
+      "bytes": 876
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/close-icon.tsx",
+      "sha256": "29e92982de89476b87b02abc3b56b772ac51e0dd497aaccf3e773417e198ace3",
+      "bytes": 993
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/code-block-icon.tsx",
+      "sha256": "2f94018aa99032496d3f34104ef3708268db55018b5cb08e83dcd7372e8d56f9",
+      "bytes": 1732
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/code2-icon.tsx",
+      "sha256": "e199801c7b0957b11de6349e3eb300c35e6ba262da045abcdf546cd9e9d44630",
+      "bytes": 1495
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/corner-down-left-icon.tsx",
+      "sha256": "a8f33107083e2d403c2b7568fb7ba2b81824db12b79157fec0ec8e42aa5dccc9",
+      "bytes": 1094
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/external-link-icon.tsx",
+      "sha256": "1ce26296b16dba27be6285e1c3d0cec97519917db60843fbb3a79b91566f6143",
+      "bytes": 1442
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/heading-five-icon.tsx",
+      "sha256": "33637ae5909c4767269d110fdfb00c5f5313d33f19af7a52e1cdd0d760155ca8",
+      "bytes": 1247
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/heading-four-icon.tsx",
+      "sha256": "9f1f6269fb7bcc34c240cada686dcab72f1d7674ad34a4a52397c135fe4e9666",
+      "bytes": 1023
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/heading-icon.tsx",
+      "sha256": "ca37dbb07057cc7f8d3c1390487ec2eceef4afb5d22522a034d96186a5744168",
+      "bytes": 724
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/heading-one-icon.tsx",
+      "sha256": "1dcea8defb0c53fa5b071a9d00055aeeee04294474462dd3ee1c3597f1b0e185",
+      "bytes": 1119
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/heading-six-icon.tsx",
+      "sha256": "a40f29072b6caec1294a42dcf2fd52cf8a30e9069debfe87785e92e0ab7ea5c8",
+      "bytes": 1347
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/heading-three-icon.tsx",
+      "sha256": "ce3704ff0d3eafd993cdd6f55b795beef11710d5305e4b838860ef0fb1d67290",
+      "bytes": 2062
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/heading-two-icon.tsx",
+      "sha256": "25ded981957f42db610277fe2597fb9011b5ad5cec12f9fe21228f861c8800d3",
+      "bytes": 1677
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/highlighter-icon.tsx",
+      "sha256": "ef1cbdb056ca23019ccd2b3d030510404172f58931286cd00d4a1678b234416b",
+      "bytes": 1429
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/image-plus-icon.tsx",
+      "sha256": "2a49f30d8c0872cfc87988cf2269f7d984a5df3f0e9707ec9f9312938c2de026",
+      "bytes": 2321
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/italic-icon.tsx",
+      "sha256": "9540788bf384c810df08151e6308cae14081ac1d95b551a7afa329797e0525fd",
+      "bytes": 853
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/link-icon.tsx",
+      "sha256": "cbec84804c2b01bdefafb59df66dfb0fdac67e0eb290c5891d362a4d694efc5d",
+      "bytes": 2664
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/list-icon.tsx",
+      "sha256": "0b753a0e4b07acfc1f26dd453283ebe95c5940cbbc7f01ff610aa89f775a66ec",
+      "bytes": 1905
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/list-ordered-icon.tsx",
+      "sha256": "3fbd7358bba85c3ff63c2ce2070842cd22c1ac03f816b9002a43af66161aaf73",
+      "bytes": 2598
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/list-todo-icon.tsx",
+      "sha256": "3a662a11dcd4727a1eed800e94499140f738587e70c0f4524bb23b0a7f36fbdf",
+      "bytes": 1875
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/moon-star-icon.tsx",
+      "sha256": "bb6e734be1def469696579d892cc348ae46f8feebb8c4beef9ae4d891dd831e0",
+      "bytes": 2140
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/redo2-icon.tsx",
+      "sha256": "d9792b83a01a6c08a5c5905a4665f148c1ab3740f88096734eb601ea41287bc0",
+      "bytes": 1325
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/strike-icon.tsx",
+      "sha256": "9022aac5b23878a14670cbb2398af62960a2234ae7348e8fed6bdfe2fd84bd51",
+      "bytes": 1564
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/subscript-icon.tsx",
+      "sha256": "1470123b2b1e71ee9d185350ccf5392097f3fd02e50cf0f8fc57630fbb93df78",
+      "bytes": 2311
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/sun-icon.tsx",
+      "sha256": "9e5af8123b70105d2855a9cd768349a0814eae2bce9097defdda6509ac5bddd3",
+      "bytes": 2743
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/superscript-icon.tsx",
+      "sha256": "e69446590079c1110efff42ad399ef6bf96e394b274699a297c2de86c80c4ec2",
+      "bytes": 2335
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/trash-icon.tsx",
+      "sha256": "96d6afbf1c788e378a6df43cc463f13846cc086a6aa202d48b03875d03c97567",
+      "bytes": 1294
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/underline-icon.tsx",
+      "sha256": "299b5d29b3a9ef1b771422b0f40c712cf45c35bf997f25699ff9f4f20e421b2d",
+      "bytes": 1085
+    },
+    {
+      "path": "apps/web/src/components/tiptap-icons/undo2-icon.tsx",
+      "sha256": "cdbbda45463ad391567a3d81443d1592bab413eb18819129a4a39df919d3c960",
+      "bytes": 1618
+    },
+    {
+      "path": "apps/web/src/components/tiptap-node/blockquote-node/blockquote-node.scss",
+      "sha256": "b945a853c52cb20e18493694b73397150ab59f3722ce916d057acc8221f1285b",
+      "bytes": 674
+    },
+    {
+      "path": "apps/web/src/components/tiptap-node/code-block-node/code-block-node.scss",
+      "sha256": "e0cd584b72de8b344a049e0c84afecf683923cec9348d6e6aa003a34a61cf657",
+      "bytes": 1588
+    },
+    {
+      "path": "apps/web/src/components/tiptap-node/heading-node/heading-node.scss",
+      "sha256": "5b8f8ec16eafb273c2d7785fed0c5bb0a6d83939b4fff6bf61dbd53fce3f040b",
+      "bytes": 481
+    },
+    {
+      "path": "apps/web/src/components/tiptap-node/horizontal-rule-node/horizontal-rule-node-extension.ts",
+      "sha256": "c1f7b52f8ffeeee95e3b10d199094061bef5d445d03d3cd5fef2c92bfc865e47",
+      "bytes": 360
+    },
+    {
+      "path": "apps/web/src/components/tiptap-node/horizontal-rule-node/horizontal-rule-node.scss",
+      "sha256": "1baead700a5bd15786770a7ec57406625a3fd51981ca8e53b1bba14265994aa5",
+      "bytes": 495
+    },
+    {
+      "path": "apps/web/src/components/tiptap-node/image-node/image-node.scss",
+      "sha256": "a204c3015322a36674f3bdaf69a431eacf46d1727aee49a1dfa4a78e28aa76cf",
+      "bytes": 598
+    },
+    {
+      "path": "apps/web/src/components/tiptap-node/image-upload-node/image-upload-node-extension.ts",
+      "sha256": "1cbfcf1083f78b65d2824faff15013eb2a22265225b2331950ebb4303f77f9a6",
+      "bytes": 3708
+    },
+    {
+      "path": "apps/web/src/components/tiptap-node/image-upload-node/image-upload-node.scss",
+      "sha256": "9fce3a746eadd5be3a6ea910852a94c5b456e38ac764b5eb8644cbe7e4d9e83e",
+      "bytes": 6410
+    },
+    {
+      "path": "apps/web/src/components/tiptap-node/image-upload-node/image-upload-node.tsx",
+      "sha256": "d89f0c095426cb90bbeb1fb1b42c7878227fc5e0ee2d6a1c8b72c1186377a377",
+      "bytes": 16567
+    },
+    {
+      "path": "apps/web/src/components/tiptap-node/image-upload-node/index.tsx",
+      "sha256": "aad44e945d839210830410335b5bc7f3dc21ae90c4b65c794193e6aa508d42dc",
+      "bytes": 46
+    },
+    {
+      "path": "apps/web/src/components/tiptap-node/list-node/list-node.scss",
+      "sha256": "3dd503eb2e2114b84a0dfea62305f7435535a5af0769b5376ef793560feb82fe",
+      "bytes": 4799
+    },
+    {
+      "path": "apps/web/src/components/tiptap-node/paragraph-node/paragraph-node.scss",
+      "sha256": "df757e91ae02cfd3e3ed1eddd3fa74fd2139ab8639a4e07cd9bdad4452f72ca6",
+      "bytes": 6340
+    },
+    {
+      "path": "apps/web/src/components/tiptap-templates/simple/data/content.json",
+      "sha256": "416bf284dec3bb4a7d04cc00d729643a14ee2d316fc35a4e20052b3d64679a77",
+      "bytes": 10788
+    },
+    {
+      "path": "apps/web/src/components/tiptap-templates/simple/simple-editor.scss",
+      "sha256": "3e293342e976e34049bfdeb1ff455f7384b82b7ff2c928485529c87a6e406723",
+      "bytes": 1490
+    },
+    {
+      "path": "apps/web/src/components/tiptap-templates/simple/simple-editor.tsx",
+      "sha256": "010483e24f72ab3c182c4c1beb2a477eb0b850401b51d45846a9eacc13a9b7bf",
+      "bytes": 8248
+    },
+    {
+      "path": "apps/web/src/components/tiptap-templates/simple/theme-toggle.tsx",
+      "sha256": "f01d7066e35aacd000858c78dd249115859ecc424712e8e2819a8491ce0f1396",
+      "bytes": 1423
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/badge/badge-colors.scss",
+      "sha256": "a4c6362cba90df44c04168e257cd80853367b9e68549279caf4d98123dc59a58",
+      "bytes": 14605
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/badge/badge-group.scss",
+      "sha256": "fd893cd89cd23a8ed2457b79e22ddf2ceb3c69bc77e9b36748087dc0a9bc681c",
+      "bytes": 256
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/badge/badge.scss",
+      "sha256": "78bcaf8c24508e19639dd86438154ee52c7d4f75c97e56df984c9117bc87fdf5",
+      "bytes": 2337
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/badge/badge.tsx",
+      "sha256": "55b1fbe16ce2f12ec58595e58abcbf5c3968f9c411a51867a1b8a3e579ed3685",
+      "bytes": 1063
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/badge/index.tsx",
+      "sha256": "58caaaf0c3a0750b39d00dcb5486093aebbd154606a4c49af8cf87edfd7607e0",
+      "bytes": 24
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/button/button-colors.scss",
+      "sha256": "eb57677f012122efa3e3a2824b7813bdc7374cbedba75337e52d37d5d9eb5757",
+      "bytes": 18406
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/button/button-group.scss",
+      "sha256": "17dc0bb40f3b452d193ee250f75bcede53196f52fc62d3d1fbbc03a06165707a",
+      "bytes": 404
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/button/button.scss",
+      "sha256": "358781023fb9787b5d6a2e3f74d731d05930b5729a4fd9aa7ec8815236b3c84b",
+      "bytes": 7350
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/button/button.tsx",
+      "sha256": "0e265d3b2b602a2673c5ff69ca99ca814af8f96ad916751f2aa26303058873c4",
+      "bytes": 2516
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/button/index.tsx",
+      "sha256": "af34b9af96acc5b433c667d1faf5c5f79cd169ef33a47d3e27b6d6f94ced22c3",
+      "bytes": 25
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/card/card.scss",
+      "sha256": "44e2ec70d55231f9e6a6f770ba082f38e49b9687a00205777517497fc7bab961",
+      "bytes": 1734
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/card/card.tsx",
+      "sha256": "d13063f5a8552473bccb35028468f7f3130bb24e96b0ab73fb39bd13ba799794",
+      "bytes": 1944
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/card/index.tsx",
+      "sha256": "20a86e9872f005ab5bcb37572776cc4fb6b1edc36ef9c60e7192b8d9608c176c",
+      "bytes": 23
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/dropdown-menu/dropdown-menu.scss",
+      "sha256": "299870e483f413cf1a6ef834fc1cb6fbbef7ec1956ba4ae792aba00750879b50",
+      "bytes": 1797
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/dropdown-menu/dropdown-menu.tsx",
+      "sha256": "9a429fcb59612a660d4b7a312c8f0d25feeebc690ecdbfaeeee1bd58da137d4f",
+      "bytes": 2877
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/dropdown-menu/index.tsx",
+      "sha256": "61a49d77af85069d456d10aa7a254f736cd82c5c8da788841c2488307f9dd8b8",
+      "bytes": 32
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/input/index.tsx",
+      "sha256": "3116182228536c5b9f9a84ad00741dbbf40ba9fc3c037d1742ba387b0c34e539",
+      "bytes": 24
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/input/input.scss",
+      "sha256": "8a6d26c3c080e49d90e87a1e0647beea16b7f05e6367e264cf626ea40ef428c9",
+      "bytes": 735
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/input/input.tsx",
+      "sha256": "5cb60a28fe6450a7dd7064e3ddafe46438bdbfad013c9999cb04d642d0ef125b",
+      "bytes": 543
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/popover/index.tsx",
+      "sha256": "f804efd927af02ab26a38a3ac62b1051c8e96a6b3e943215dfabcbd7793ded61",
+      "bytes": 26
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/popover/popover.scss",
+      "sha256": "9efabcc22ad91cb022d6ba7ed546b2534596a6f3707a610c13b1feae95f86792",
+      "bytes": 1725
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/popover/popover.tsx",
+      "sha256": "6aa4674cd8c9ea5633d51093251b3fc7581c4f1563a8f77e6cc326889fd7cd02",
+      "bytes": 924
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/separator/index.tsx",
+      "sha256": "c756fb0059b0d231c8a45691be566a43de183cc4a415f5d5182c71d453804336",
+      "bytes": 28
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/separator/separator.scss",
+      "sha256": "eba4a1cf65cf60bd17a7063cfcf1fbd636df7988ef3f0487982c5ed3a5db2c6f",
+      "bytes": 412
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/separator/separator.tsx",
+      "sha256": "90a7e5876bd8d732f4b8606736582824f3ab4eaec3bb1b2ec9df1b05db76d1dd",
+      "bytes": 932
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/spacer/index.tsx",
+      "sha256": "38200c16e27cee596954eddc6d4f6395427b8bcd5f78d8aacb6efd63ea823fb0",
+      "bytes": 25
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/spacer/spacer.tsx",
+      "sha256": "ed7ff2949011cb8a8035909374035be2d3aed9f14f9f8f599dd7a08d5ae49e5f",
+      "bytes": 650
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/toolbar/index.tsx",
+      "sha256": "8d30c7b35aa0363236117b2141f433abbe9f341ca5c72c69865b41ee256f95ee",
+      "bytes": 26
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/toolbar/toolbar.scss",
+      "sha256": "970068cb19c28a86a0cd622f26c2dcac294320935006615ff77907396471603b",
+      "bytes": 2266
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/toolbar/toolbar.tsx",
+      "sha256": "426f83fcb34203549d95a4722a209ba36187a7eeed845fb6393e3696c200bdab",
+      "bytes": 3514
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/tooltip/index.tsx",
+      "sha256": "72adb579c7efd98b33712c48a5ccbb804780983fdf674ba48ef87a168bb64f76",
+      "bytes": 26
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/tooltip/tooltip.scss",
+      "sha256": "e86280e084edb96517200e35345849bff791eb6a9870c560d7b2d5b681175050",
+      "bytes": 961
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui-primitive/tooltip/tooltip.tsx",
+      "sha256": "fc129f67e61fac3784a6ef8ed31e4a6332d32bfbff4dcbad67b33f0fbdfd4d2b",
+      "bytes": 5505
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/blockquote-button/blockquote-button.tsx",
+      "sha256": "e2aa0f1e3d335be70297e1a92ab30553f691e5c45efde88d2c00e0fdc019f339",
+      "bytes": 2889
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/blockquote-button/index.tsx",
+      "sha256": "f12e0b7f7dc629ecf4247a4df0eb94a2ea683f95efeaf84d30322e569fb6c28a",
+      "bytes": 69
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/blockquote-button/use-blockquote.ts",
+      "sha256": "b6e4226da7413962cab66d3e022516c79c18dcb618f0c202084d368e5d9b8e1a",
+      "bytes": 5757
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/code-block-button/code-block-button.tsx",
+      "sha256": "dae1012a02414634e00bff6de354985aa176f34a85ec963289744c87795718c5",
+      "bytes": 2877
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/code-block-button/index.tsx",
+      "sha256": "b2448bf4af6dd5b913c75e004fb91bc8a1986557b3a1d63f29d2250d719910da",
+      "bytes": 69
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/code-block-button/use-code-block.ts",
+      "sha256": "88e58494777c3479cc0d62c7e40e657edd7c382c1927dd85eba7efdc0fcf3b61",
+      "bytes": 5817
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/color-highlight-button/color-highlight-button.scss",
+      "sha256": "8ed29651763eb3cd5e13acde4c8b3208013a5830bf54c7fe37690a305e533500",
+      "bytes": 953
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/color-highlight-button/color-highlight-button.tsx",
+      "sha256": "6baa1163c98b89974a407020b022387acec7032b5516c08f673e8e561cdb2b60",
+      "bytes": 3591
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/color-highlight-button/index.tsx",
+      "sha256": "ed4e326a8b9cd2891e46f3f947eb972cd1e39c010f262f7d24d3901c0538ea1a",
+      "bytes": 79
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/color-highlight-button/use-color-highlight.ts",
+      "sha256": "029f1562ad38cea9399797c7a725be7c86faf0cb5d2a3ffc2e92b041e06609aa",
+      "bytes": 6441
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/color-highlight-popover/color-highlight-popover.tsx",
+      "sha256": "cd324d1599832efd83b828548f7898c999ab9cc66b373cbf67e830355ac70b89",
+      "bytes": 6193
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/color-highlight-popover/index.tsx",
+      "sha256": "70c56df2fda70ffb7ba8ecb59e69c72c6ac34e2cf0fd3c40f52d0dea15a147ec",
+      "bytes": 42
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/heading-button/heading-button.tsx",
+      "sha256": "b013cb69312ff6b20b5e2f2d28315af104c999fbb23dcbac07b080e32b2520fd",
+      "bytes": 2900
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/heading-button/index.tsx",
+      "sha256": "70362da64f74b9ef0ae7d9f6cdeb6b0107f6d3082c5cfa7c4a06a3c9df8b5967",
+      "bytes": 63
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/heading-button/use-heading.ts",
+      "sha256": "8cd8a5717226e2af9db1b1fed3697b75409f381f753e456481c3279dee37a077",
+      "bytes": 7462
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/heading-dropdown-menu/heading-dropdown-menu.tsx",
+      "sha256": "80a8318fea7b77edc27b70f8f255659f142d1282a18b5a8a418d722dd950fd30",
+      "bytes": 3686
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/heading-dropdown-menu/index.tsx",
+      "sha256": "cd169901c1b460667f6d27fac95f64482c40e55fde30b8d37963f36aba2f3045",
+      "bytes": 84
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/heading-dropdown-menu/use-heading-dropdown-menu.ts",
+      "sha256": "7c7f06aacb1e75f2ac1a382f1063b1d3950f477944c67c2cb55519973832c956",
+      "bytes": 3017
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/image-upload-button/image-upload-button.tsx",
+      "sha256": "a420422b67eef465177c7b512dbabdc52d44f2f65c6179260621fc51b316a3af",
+      "bytes": 2862
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/image-upload-button/index.tsx",
+      "sha256": "fa02073abfd60460b713f9fe577ff9b51c7a116179db2b7ddede4b47697bb05f",
+      "bytes": 73
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/image-upload-button/use-image-upload.ts",
+      "sha256": "3937bbc89f12a06a55dc21386dd3b39e137d20aab9f3153275a0cc2d7c428591",
+      "bytes": 4556
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/link-popover/index.tsx",
+      "sha256": "af91196a1eea0d2fc1dba43e6c94dad88d97ca13723fd6b03ebe18af83808f85",
+      "bytes": 66
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/link-popover/link-popover.tsx",
+      "sha256": "619ad860470939b20c5420f2f02d6212841730f6286397ae03ac0af0a6df923a",
+      "bytes": 7464
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/link-popover/use-link-popover.ts",
+      "sha256": "5fa88a009ee485cdaa496bc2fb710ab29cce112ec358f84096600a9ce8415a4d",
+      "bytes": 5872
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/list-button/index.tsx",
+      "sha256": "1dcaef38339a6cc5fca287411b18a3e0ce221ddc21cf1e489e57cdc35ea03d14",
+      "bytes": 57
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/list-button/list-button.tsx",
+      "sha256": "fbdb0c142d45a0167c91912fc0e191741ad7d82e249d59bf9e6b455cb93a6dd2",
+      "bytes": 2851
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/list-button/use-list.ts",
+      "sha256": "6094893ed72d92c094d3822fbb607dccbc17aa673dd247dc308abf3be8718d2f",
+      "bytes": 7430
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/list-dropdown-menu/index.tsx",
+      "sha256": "73da4da9a62635de4aca027d90b590f6ac2592ff4aad4ca3b0e4427656a6583a",
+      "bytes": 37
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/list-dropdown-menu/list-dropdown-menu.tsx",
+      "sha256": "901e2117807e116a8d9c3bca6f27d29231c7495726840364167159b4d3a6601f",
+      "bytes": 3346
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/list-dropdown-menu/use-list-dropdown-menu.ts",
+      "sha256": "6dae522c340d861db8839c42c0cf38dd92b64a0086eb6c977bb6db30f7c4947c",
+      "bytes": 5078
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/mark-button/index.tsx",
+      "sha256": "56eaf59da2c4f1d5ed1ce8c261e0dbac098d2cd9fdad07215cfe907e1db6bfa8",
+      "bytes": 57
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/mark-button/mark-button.tsx",
+      "sha256": "2336d09c9f5caa64d67e30b4cb6e20853a8fdcbf91f8ad677b55268a501b551e",
+      "bytes": 2851
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/mark-button/use-mark.ts",
+      "sha256": "334d27db14ff842c15bede05dbe7ca9e1ac1f5764cd39e056ee27ba610d73946",
+      "bytes": 5136
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/text-align-button/index.tsx",
+      "sha256": "5a0978c487b0ae46c9b8ae376e7bd28ef2575404508f977dae15bae126666112",
+      "bytes": 69
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/text-align-button/text-align-button.tsx",
+      "sha256": "f41240224e23c0ab57567de7f25923c4b1d7d00d26536072961a54584564475f",
+      "bytes": 3389
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/text-align-button/use-text-align.ts",
+      "sha256": "85e06c75641d2c80cb74426f014397b4c5ed96f415083e85d78c4a61770a655d",
+      "bytes": 5436
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/undo-redo-button/index.tsx",
+      "sha256": "21584e590022dd13e939571b798b2f90bb3ce6009d328e9fc79df7e658050ec0",
+      "bytes": 67
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/undo-redo-button/undo-redo-button.tsx",
+      "sha256": "3d43ec0681a8059fadbc1c951f7c44f376786121b360c34046ba2d0759284704",
+      "bytes": 2912
+    },
+    {
+      "path": "apps/web/src/components/tiptap-ui/undo-redo-button/use-undo-redo.ts",
+      "sha256": "588b8100aa6489b036dc0015477abcf142516746b8a6ac649b25ea22d9e4498e",
+      "bytes": 4290
+    },
+    {
+      "path": "apps/web/src/hooks/use-composed-ref.ts",
+      "sha256": "0007055c18b2c8869396414f441b6409196ae7eb3af77b6d12295e1a3a7bdc4d",
+      "bytes": 1116
+    },
+    {
+      "path": "apps/web/src/hooks/use-cursor-visibility.ts",
+      "sha256": "29c7b0ceb9602ab346791c61785a7eac6072016d46c44b68d547718f7664d3ec",
+      "bytes": 2048
+    },
+    {
+      "path": "apps/web/src/hooks/use-element-rect.ts",
+      "sha256": "697310e61bdab1d306b42c54a0cb2615ed0b91b2a2a5991e58a9513f8f9b5245",
+      "bytes": 4009
+    },
+    {
+      "path": "apps/web/src/hooks/use-menu-navigation.ts",
+      "sha256": "56493ad94c1eb5abe5a8993c8f2be9eb63bb4d9df2ca7be020c10559d5e945b9",
+      "bytes": 4591
+    },
+    {
+      "path": "apps/web/src/hooks/use-mobile.ts",
+      "sha256": "1adae8a6fe6a77bf4ffc13a4a60a566f8350a5759bee85a71fcfbca0b9dcfae8",
+      "bytes": 539
+    },
+    {
+      "path": "apps/web/src/hooks/use-scrolling.ts",
+      "sha256": "8bd7a2d6d1869f9c7880c3cabd79941b6dfa4add2674126806d3344da8534ec1",
+      "bytes": 2173
+    },
+    {
+      "path": "apps/web/src/hooks/use-throttled-callback.ts",
+      "sha256": "bffd736ac654409bcc746984fc5421ed4bfd12370588f2de92fa7acb99345a30",
+      "bytes": 1190
+    },
+    {
+      "path": "apps/web/src/hooks/use-tiptap-editor.ts",
+      "sha256": "fe2ce45cbfafc7c4ccb1a0d5d01653fecfd254d41d365283b36a2f27f3cfd4ce",
+      "bytes": 1391
+    },
+    {
+      "path": "apps/web/src/hooks/use-unmount.ts",
+      "sha256": "5cee44d9b6e9269a240f601aab6f4cdc529f2e9ac21137f2ea9259748d839575",
+      "bytes": 468
+    },
+    {
+      "path": "apps/web/src/hooks/use-window-size.ts",
+      "sha256": "d91d1b49c5a86b6225e4db35d55163d18759d032cff41b1036877e7e9305cbb5",
+      "bytes": 2456
+    },
+    {
+      "path": "apps/web/src/lib/tiptap-utils.ts",
+      "sha256": "e1d6c029e79bfec4850989d93d8f859d5b2b655798cea38b762774727e727367",
+      "bytes": 10777
+    },
+    {
+      "path": "apps/web/src/styles/_keyframe-animations.scss",
+      "sha256": "1803b74fff82ae664de5f31998f58adbd6e2195146869b9567477e7075768bec",
+      "bytes": 1074
+    },
+    {
+      "path": "apps/web/src/styles/_variables.scss",
+      "sha256": "a58d5c3c46a9fade2b7634dbb34ec68030cf7187284bad22fb775364616384a2",
+      "bytes": 11234
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "0501adc8d45a79414eb5e8656c6d1463acf954b2fc69d09cea9f5cf92f83e32e",
+      "bytes": 1063
+    },
+    {
+      "path": "README.md",
+      "sha256": "b154cb254c9ef605dd1d1b13f9cd901a548fa79380f43da9170e50f86cc70f8d",
+      "bytes": 2436
+    },
+    {
+      "path": "apps/web/package.json",
+      "sha256": "6e7223733c684930b6a264c5e4a8c5104727fe71648c9573fa866796370f33ad",
+      "bytes": 1685
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+.tool-window-trigger { flex: none; white-space: nowrap; }
+.tool-window-shell { height: 100%; display: flex; flex-direction: column; min-width: 0; }
+.tool-window-header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; border-bottom: 1px solid var(--border); flex: none; }
+.tool-window-header strong { font-size: 14px; }
+.tool-window-header > span { margin-right: auto; color: var(--muted); font-size: 11px; }
+.tool-window-header button { flex: none; }
+.tool-window-content { flex: 1; min-height: 0; overflow: auto; padding: 24px; }
+.tool-window-footer { padding: 8px 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 10px; flex: none; }
+@media (max-width: 680px) { .tool-window-header { padding: 10px 14px; gap: 8px; } .tool-window-header > span { display: none; } .tool-window-header strong { margin-right: auto; } .tool-window-content { padding: 16px; } }
+@media (max-width: 420px) { .topbar .tool-window-trigger > span { display: none; } }
+
+@media (max-width: 420px) { .tool-window-header .small > span { display: none; } .tool-window-header { gap: 6px; } }
+
+html[data-window-save-pending="true"] .tool-window-header strong::after, html[data-window-save-pending="true"] .topbar .breadcrumb::after { content: " · 保存中…"; color: var(--muted); font-size: 11px; }
+html[data-window-save-pending="true"] body { cursor: wait; }
+
+.tool-window-content.logs-host > .dev-logs-page { flex: 1; min-height: 0; }

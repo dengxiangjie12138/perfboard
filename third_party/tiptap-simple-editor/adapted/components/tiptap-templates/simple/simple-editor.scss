@@ -1,0 +1,5 @@
+@use "../../../styles/variables";
+@use "../../../styles/keyframe-animations";
+.simple-editor-wrapper { display:flex; flex-direction:column; flex:1; min-height:0; overflow:hidden; --tt-toolbar-height:44px; }
+.simple-editor-content { min-width:0; width:100%; }
+.simple-editor-content .tiptap.ProseMirror.simple-editor { outline:none; min-height:420px; padding:28px 30px 100px 64px; font:14px/1.85 var(--font-family, system-ui, sans-serif); color:var(--text); }

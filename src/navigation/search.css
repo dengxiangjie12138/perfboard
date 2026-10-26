@@ -1,0 +1,24 @@
+/* About one third of the full window; flex shrinking preserves header controls. */
+.topbar { min-width: 0; }
+.topbar .breadcrumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar .local-badge { flex: none; white-space: nowrap; }
+.topbar .global-search { flex: 0 1 33.333vw; width: 33.333vw; min-width: 0; }
+.global-search > svg { flex: none; }
+.global-search > input { flex: 1 1 0; width: 0; min-width: 0; font-size: 12px; }
+.global-search > input::-webkit-search-cancel-button { display: none; }
+.global-search > button { flex: none; }
+.global-search .search-results { width: max(100%, 360px); max-width: calc(100vw - 36px); }
+.global-search-sidebar { width: 100%; flex: none; min-width: 0; padding: 6px 10px; border: 1px solid var(--border); background: var(--input); border-radius: 7px; }
+.global-search-sidebar > input { font-size: 12px; padding: 4px 0; }
+.global-search-sidebar .search-results { top: calc(100% + 8px); left: 0; right: auto; width: 100%; max-width: none; max-height: min(60vh, 480px); }
+.search-suggestions { border-top: 1px solid var(--border); margin-top: 5px; padding-top: 4px; }
+.search-suggestions .search-suggestion-heading { color: var(--muted); font-size: 10px; margin: 8px; }
+.search-suggestion-text { display: flex; flex-direction: column; min-width: 0; }
+.search-suggestion-text small { color: var(--muted); font-size: 10px; margin-top: 3px; }
+@media (max-width: 900px) { .topbar { gap: 14px; } }
+@media (max-width: 680px) {
+  .topbar .global-search { flex: 1 1 55%; width: auto; }
+  .topbar .breadcrumb { flex: 0 1 28%; }
+  .global-search .search-results { right: 0; width: min(360px, calc(100vw - 36px)); }
+  .global-search-sidebar .search-results { width: 100%; right: auto; }
+}

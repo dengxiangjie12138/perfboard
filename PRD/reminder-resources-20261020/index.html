@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>洞洞板 · 提醒与日志资源 · 2026-10-20</title>
+<style>
+:root{font:16px system-ui;color:#e7edf5;background:#171b22}body{max-width:960px;margin:40px auto;padding:0 24px}h1{font-size:28px}p{line-height:1.8;color:#b8c3d1}section{background:#202631;border:1px solid #364050;border-radius:16px;padding:24px;margin:20px 0}button{border:1px solid #4e6178;background:#2e3c50;color:white;padding:10px 16px;border-radius:8px;margin:4px;cursor:pointer}.primary{background:#276954}.file{display:flex;align-items:center;gap:16px;padding:16px;border:1px solid #4e6178;border-radius:10px}.file span{flex:1}.file small{color:#b8c3d1}img{max-width:100%}.shade{position:fixed;inset:0;background:#080d18aa;display:grid;place-items:center;padding:24px}.shade[hidden]{display:none}.card{max-width:560px;background:#202631;border:1px solid #52657e;border-radius:16px;padding:32px;box-shadow:0 30px 100px #0008}.status{color:#8fe0b8}label{display:block;margin:12px 0}input{padding:8px;background:#171b22;color:white;border:1px solid #52657e;border-radius:5px}
+</style>
+<h1>洞洞板 · 提醒与日志资源</h1><p>2026-10-20 交互说明快照。演示数据仅在此页内存中，不访问仓库、不触发系统提醒。</p>
+<section><h2>提醒升级</h2><label><input type="checkbox" checked id="enabled"> 未处理时升级为大提醒</label><label>等待 <input id="delay" type="number" value="5" min="1" max="60" style="width:60px"> 分钟</label><button id="small">演示小提醒</button><button id="show">演示合并大提醒</button><p id="status" class="status">第一次保留小提醒；未处理时升级。锁屏、休眠暂停打扰。</p></section>
+<section><h2>开发日志</h2><p>图片、截图和文件保存在当前 SQLite 仓库；正文和历史只记录资源 ID。</p><button id="pick">选择合成示例文件</button><input id="file" type="file" hidden><div class="file"><span id="name">调试记录.txt</span><small id="size">26 B</small><button id="save">另存为示例</button></div><p>正式应用支持按钮、剪贴板图片、拖入图片及普通文件。打开使用临时副本，外部修改不自动写回。每个文件最大 20 MiB。</p></section>
+<div class="shade" id="overlay" hidden><div class="card" role="dialog" aria-modal="true" aria-labelledby="title"><h2 id="title">该活动一下了</h2><p>久坐与健身提醒一起处理，每块显示器都有清楚的操作和退出途径。</p><button class="primary" data-action="已开始休息或运动（演示）">开始休息 / 运动</button><button data-action="已稍后提醒（演示）">稍后</button><button data-action="已跳过本次（演示）">跳过</button><p>按 Esc 可解除此演示遮罩。</p></div></div>
+<script>
+const overlay=document.getElementById('overlay'),status=document.getElementById('status');
+function release(text){overlay.hidden=true;status.textContent=text}
+document.getElementById('small').onclick=()=>status.textContent='小提醒：该休息一下了。可以开始、稍后或跳过。';
+document.getElementById('show').onclick=()=>{overlay.hidden=false;overlay.querySelector('button').focus()};
+overlay.querySelectorAll('button').forEach(button=>button.onclick=()=>release(button.dataset.action));
+document.addEventListener('keydown',event=>{if(event.key==='Escape')release('已稍后提醒（演示）')});
+document.getElementById('pick').onclick=()=>document.getElementById('file').click();
+document.getElementById('file').onchange=event=>{const file=event.target.files[0];if(file){document.getElementById('name').textContent=file.name;document.getElementById('size').textContent=file.size+' B'}};
+document.getElementById('save').onclick=()=>{const url=URL.createObjectURL(new Blob(['这是合成的日志附件示例。'],{type:'text/plain;charset=utf-8'}));const link=document.createElement('a');link.href=url;link.download='调试记录-示例.txt';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
+</script></html>

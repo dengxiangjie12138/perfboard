@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Perfboard · 提醒与图片缩放修正</title>
+<style>
+:root{font:16px system-ui;color:#e7edf5;background:#171b22}body{max-width:900px;margin:40px auto;padding:0 24px}p{line-height:1.8;color:#bcc8d4}section{background:#202631;border:1px solid #364050;border-radius:16px;padding:24px;margin:20px 0}button{border:1px solid #4e6178;background:#2e3c50;color:white;padding:10px 16px;border-radius:8px;margin:4px;cursor:pointer}.primary{background:#276954}.reminder{max-width:520px;box-sizing:border-box;box-shadow:0 20px 90px #0007}.reminder.enhanced{position:fixed;inset:15vh 20px auto;margin:0 auto;z-index:2}.shade{position:fixed;inset:0;background:#080d18c0;z-index:1}.shade[hidden],.reminder[hidden]{display:none}.status{color:#8fe0b8}header{display:flex;align-items:center;justify-content:space-between}.image{position:relative;max-width:100%;width:400px;display:block;margin:20px 0}.image svg{width:100%;height:auto;display:block;background:#162f3e;border-radius:8px}.image.selected{outline:2px solid #73b9ef}.handle{display:none;position:absolute;right:-7px;bottom:-7px;width:20px;height:20px;padding:0;margin:0;background:#73b9ef;cursor:nwse-resize;touch-action:none}.selected .handle{display:block}.image:focus-visible{outline:2px solid white}.file{display:flex;align-items:center;gap:14px}.file span{flex:1}kbd{padding:3px 5px;background:#171b22;border-radius:4px}small{color:#b6c1d0}
+</style>
+<h1>提醒与图片缩放修正</h1>
+<p>2026-10-20 · 0.1.0 交互说明快照。此页面使用内存示例，不连接仓库、不产生系统提醒。真实实现与验证见 <a href="../../docs/FIX-REMINDER-RESOURCES-20261020.md">本轮记录</a>。</p>
+<section><h2>一个活动提醒容器</h2><p>普通提醒与升级提醒复用同一个窗口。开始运动后在原处显示进行中；关闭或 Esc 稍后处理。副屏只显示必要遮罩和退出入口。</p><button id="show">显示普通提醒</button><button id="upgrade">升级当前提醒</button><p id="status" role="status" class="status">等待演示</p></section>
+<div id="shade" class="shade" hidden></div>
+<section id="reminder" class="reminder" hidden role="dialog" aria-label="活动提醒">
+<header><b>活动提醒</b><button id="close">关闭 · <kbd>Esc</kbd></button></header>
+<h2>深蹲</h2><p id="progress">按自己的节奏活动一下。</p>
+<button id="start" class="primary">开始运动</button><button id="later">稍后</button><button id="skip">跳过本次</button>
+</section>
+<section><h2>图片等比例显示缩放</h2><p>单击图片，拖动右下角手柄。尺寸只影响正文显示；原始资源保持不变。下面的保存/重开仅演示文档属性恢复。</p>
+<div id="image" class="image" tabindex="0" role="button" aria-label="选中示例图片">
+<svg viewBox="0 0 800 480" role="img" aria-label="合成电路示例"><path d="M80 240H280M520 240H720M400 80V150M400 330V400" stroke="#7fd5b1" stroke-width="12"/><rect x="280" y="150" width="240" height="180" rx="18" fill="#376575"/><circle cx="400" cy="240" r="52" fill="#a3dfc1"/><text x="400" y="448" text-anchor="middle" fill="#d9e8f1" font-size="26">800 × 480 · 原图比例 5:3</text></svg>
+<button id="handle" class="handle" aria-label="等比例调整图片大小"></button>
+</div><button id="save">保存示例宽度</button><button id="reopen">重开示例文档</button><button id="reset">重置大小</button><p id="width" role="status">显示宽度：400 px</p>
+<div class="file"><span>调试记录.txt <small>26 B</small></span><button title="打开临时副本，外部修改不会自动写回；更新日志请重新导入。">打开 ⓘ</button></div>
+</section>
+<script>
+const byId=id=>document.getElementById(id), reminder=byId('reminder'), shade=byId('shade'), image=byId('image');
+let started=false,savedWidth=null;
+function show(){reminder.hidden=false;started=false;byId('start').textContent='开始运动';byId('progress').textContent='按自己的节奏活动一下。';byId('status').textContent='只有一个提醒容器'}
+function close(text){reminder.hidden=true;reminder.classList.remove('enhanced');shade.hidden=true;byId('status').textContent=text}
+byId('show').onclick=show;
+byId('upgrade').onclick=()=>{if(reminder.hidden)show();reminder.classList.add('enhanced');shade.hidden=false;byId('status').textContent='同一容器已升级，旧小窗不残留'};
+byId('start').onclick=()=>{if(started){close('运动已完成（演示）');return}started=true;byId('start').textContent='已完成';byId('progress').textContent='运动进行中 · 完成后点击“已完成”。'};
+byId('close').onclick=byId('later').onclick=()=>close('已稍后处理（演示）');
+byId('skip').onclick=()=>close('已跳过本次（演示）');
+document.addEventListener('keydown',event=>{if(event.key==='Escape')close('已稍后处理（演示）')});
+function setWidth(width){image.style.width=width===null?'400px':width+'px';byId('width').textContent='显示宽度：'+Math.round(image.getBoundingClientRect().width)+' px'}
+image.onclick=()=>image.classList.add('selected');
+byId('handle').onpointerdown=event=>{event.preventDefault();const handle=event.currentTarget,initialX=event.clientX,initial=image.getBoundingClientRect().width;handle.setPointerCapture(event.pointerId);handle.onpointermove=move=>setWidth(Math.max(64,Math.min(800,initial+move.clientX-initialX)));handle.onpointerup=handle.onpointercancel=()=>{handle.onpointermove=null}};
+byId('reset').onclick=()=>setWidth(null);
+byId('save').onclick=()=>{savedWidth=parseInt(image.style.width||'400');byId('width').textContent='已保存显示宽度：'+savedWidth+' px'};
+byId('reopen').onclick=()=>{setWidth(savedWidth);image.classList.remove('selected')};
+</script></html>

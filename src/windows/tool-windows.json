@@ -1,0 +1,154 @@
+[
+  {
+    "id": "opamp",
+    "title": "运放选型计算",
+    "width": 1320,
+    "height": 900,
+    "minWidth": 900,
+    "minHeight": 600
+  },
+  {
+    "id": "feedback",
+    "title": "反馈电阻",
+    "width": 1100,
+    "height": 800,
+    "minWidth": 640,
+    "minHeight": 480
+  },
+  {
+    "id": "voltage-divider",
+    "title": "分压计算器",
+    "width": 1100,
+    "height": 850,
+    "minWidth": 640,
+    "minHeight": 480
+  },
+  {
+    "id": "tl431",
+    "title": "TL431 基准电压计算",
+    "width": 1200,
+    "height": 900,
+    "minWidth": 700,
+    "minHeight": 500
+  },
+  {
+    "id": "pullup-divider",
+    "title": "带上拉分压计算",
+    "width": 1200,
+    "height": 900,
+    "minWidth": 700,
+    "minHeight": 500
+  },
+  {
+    "id": "uc28-38xx",
+    "title": "UC28/38xx 计算",
+    "width": 1320,
+    "height": 900,
+    "minWidth": 800,
+    "minHeight": 550
+  },
+  {
+    "id": "pmos-switch",
+    "title": "PMOS 开关电阻计算",
+    "width": 1200,
+    "height": 900,
+    "minWidth": 700,
+    "minHeight": 500
+  },
+  {
+    "id": "timer",
+    "title": "定时器计算",
+    "width": 1100,
+    "height": 800,
+    "minWidth": 640,
+    "minHeight": 480
+  },
+  {
+    "id": "radix",
+    "title": "进制转换",
+    "width": 1100,
+    "height": 800,
+    "minWidth": 640,
+    "minHeight": 480
+  },
+  {
+    "id": "led",
+    "title": "LED限流计算",
+    "width": 1100,
+    "height": 800,
+    "minWidth": 640,
+    "minHeight": 480
+  },
+  {
+    "id": "resistor-series",
+    "title": "电阻串联计算",
+    "width": 1100,
+    "height": 800,
+    "minWidth": 640,
+    "minHeight": 480
+  },
+  {
+    "id": "resistor-parallel",
+    "title": "电阻并联计算",
+    "width": 1100,
+    "height": 800,
+    "minWidth": 640,
+    "minHeight": 480
+  },
+  {
+    "id": "json",
+    "title": "JSON解析",
+    "width": 1100,
+    "height": 800,
+    "minWidth": 640,
+    "minHeight": 480
+  },
+  {
+    "id": "wire-gauge",
+    "title": "线径计算",
+    "width": 1100,
+    "height": 800,
+    "minWidth": 640,
+    "minHeight": 480
+  },
+  {
+    "id": "cores",
+    "title": "磁芯库",
+    "width": 1200,
+    "height": 850,
+    "minWidth": 640,
+    "minHeight": 480
+  },
+  {
+    "id": "external-tools",
+    "title": "外部工具",
+    "width": 1200,
+    "height": 850,
+    "minWidth": 640,
+    "minHeight": 480
+  },
+  {
+    "id": "standing-reminder",
+    "title": "久坐提醒",
+    "width": 1000,
+    "height": 780,
+    "minWidth": 640,
+    "minHeight": 480
+  },
+  {
+    "id": "fitness",
+    "title": "工作与健身",
+    "width": 1100,
+    "height": 820,
+    "minWidth": 640,
+    "minHeight": 480
+  },
+  {
+    "id": "transformer-design",
+    "title": "变压器设计记录",
+    "width": 1320,
+    "height": 900,
+    "minWidth": 900,
+    "minHeight": 600
+  }
+]

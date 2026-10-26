@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "fitness-prompt",
+  "description": "One native-created fitness reminder; aggregate status subscriptions only. Commands validate the sender and current reminder ID.",
+  "windows": ["fitness-prompt"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+}

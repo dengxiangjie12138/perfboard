@@ -1,0 +1,50 @@
+.part-model-package{grid-column:1/-1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}.parts-table .part-name{white-space:normal;overflow-wrap:anywhere}.parts-table .part-package{white-space:normal;overflow-wrap:anywhere}
+
+.parts-table .part-lcsc{max-width:144px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.parts-table th:nth-child(1){width:20%}.parts-table th:nth-child(2){width:12%}.parts-table th:nth-child(3){width:14%}.parts-table th:nth-child(4){width:16%}.parts-table th:nth-child(5){width:14%}.parts-table th:nth-child(6){width:15%}.parts-table th:nth-child(7){width:9%}
+
+.parts-table .part-location{overflow:hidden}
+.location-tag{display:inline-block;max-width:100%;padding:3px 8px;border-radius:5px;background:hsl(var(--location-hue) 16% 23%);color:var(--text);font-size:11px;line-height:1.5;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.location-tag[data-tone="0"]{--location-hue:150}
+.location-tag[data-tone="1"]{--location-hue:180}
+.location-tag[data-tone="2"]{--location-hue:214}
+.location-tag[data-tone="3"]{--location-hue:250}
+.location-tag[data-tone="4"]{--location-hue:282}
+.location-tag[data-tone="5"]{--location-hue:316}
+.location-tag[data-tone="6"]{--location-hue:345}
+.location-tag[data-tone="7"]{--location-hue:25}
+.location-tag[data-tone="8"]{--location-hue:55}
+.location-tag[data-tone="9"]{--location-hue:90}
+:root[data-theme=light] .location-tag{background:hsl(var(--location-hue) 36% 89%)}
+:root[data-theme=dark] .location-tag{background:hsl(var(--location-hue) 22% 24%)}
+
+/* Inventory occupies the bounded .main-content.inventory-host in either window. */
+.parts-page { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; width: 100%; }
+.inventory-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; flex: none; }
+.inventory-heading h1 { font-size: 22px; margin: 0; }
+.inventory-heading > button { flex: none; }
+.parts-page .inventory-toolbar { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; flex: none; }
+.parts-page .search-input { flex: none; width: 100%; }
+.inventory-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.inventory-warehouse-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.inventory-warehouse-toggle input { width: 14px; height: 14px; padding: 0; margin: 0; flex: none; accent-color: var(--accent); }
+.parts-page .inventory-toolbar select { min-width: 140px; font-size: 12px; }
+.parts-page .inventory-card { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; padding: 0; overflow: hidden; }
+.inventory-card > .table-scroll { flex: 1 1 0; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.parts-table { border-collapse: separate; border-spacing: 0; }
+.parts-table th { position: sticky; top: 0; z-index: 2; background: var(--surface); box-shadow: 0 1px 0 var(--border); }
+.inventory-card > .table-footer { flex: none; border-top: 1px solid var(--border); background: var(--surface); }
+.inventory-suggestions { border-top: 1px solid var(--border); padding: 16px; }
+.inventory-suggestions h2 { font-size: 12px; color: var(--muted); margin-bottom: 12px; }
+.inventory-suggestion { display: flex; align-items: center; justify-content: space-between; width: 100%; text-align: left; gap: 12px; margin-top: 8px; }
+.inventory-suggestion span { min-width: 0; overflow-wrap: anywhere; }
+.inventory-suggestion small { color: var(--muted); font-size: 11px; flex: none; }
+@media (max-width: 680px) {
+  .inventory-heading { gap: 10px; }
+  .inventory-heading h1 { font-size: 20px; }
+  .inventory-heading > button { padding: 7px 10px; font-size: 12px; }
+  .inventory-filters > select { flex: 1; width: 0; }
+  .parts-page .inventory-toolbar select { min-width: 0; }
+  .inventory-suggestion { align-items: flex-start; flex-direction: column; gap: 4px; }
+}

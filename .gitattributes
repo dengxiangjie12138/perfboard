@@ -1,0 +1,7 @@
+
+
+# Preserve the upstream font license verbatim, including its existing line whitespace.
+public/transformer-design/fonts/OFL-NotoSansSC.txt -text whitespace=-blank-at-eol
+# Preserve snapshot bytes so manifest hashes also match after a clone.
+data/current/** -text whitespace=cr-at-eol
+data/current/**/*.sqlite* binary

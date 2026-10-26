@@ -1,0 +1,8 @@
+.enable-switch{display:inline-flex;align-items:center;gap:8px;cursor:pointer}
+.enable-switch>input[type=checkbox]{appearance:none;position:relative;display:inline-block;flex:none;width:36px;height:20px;margin:0;padding:0;border:1px solid transparent;border-radius:12px;background:var(--muted);vertical-align:middle;cursor:pointer;transition:background .15s}
+.enable-switch>input[type=checkbox]::before{content:'';position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--surface);transition:transform .15s}
+.enable-switch>input[type=checkbox]:checked{background:var(--connection-green)}
+.enable-switch>input[type=checkbox]:checked::before{transform:translateX(16px)}
+.enable-switch>input[type=checkbox]:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.enable-switch>input[type=checkbox]:disabled{opacity:.55;cursor:default}
+@media(prefers-reduced-motion:reduce){.enable-switch>input[type=checkbox],.enable-switch>input[type=checkbox]::before{transition:none}}

@@ -1,0 +1,92 @@
+[
+  {
+    "$schema": "../gen/schemas/desktop-schema.json",
+    "identifier": "tool-windows",
+    "description": "Native allowlisted independent windows. Tools receive event subscriptions only. Document children additionally receive local file dialogs. Dynamic labels are validated against native window contexts.",
+    "windows": [
+      "tool-opamp",
+      "tool-feedback",
+      "tool-voltage-divider",
+      "tool-tl431",
+      "tool-pullup-divider",
+      "tool-uc28-38xx",
+      "tool-pmos-switch",
+      "tool-timer",
+      "tool-radix",
+      "tool-led",
+      "tool-resistor-series",
+      "tool-resistor-parallel",
+      "tool-json",
+      "tool-wire-gauge",
+      "tool-cores",
+      "tool-external-tools",
+      "tool-standing-reminder",
+      "tool-fitness",
+      "tool-transformer-design",
+      "tool-opamp-*",
+      "tool-feedback-*",
+      "tool-voltage-divider-*",
+      "tool-tl431-*",
+      "tool-pullup-divider-*",
+      "tool-uc28-38xx-*",
+      "tool-pmos-switch-*",
+      "tool-timer-*",
+      "tool-radix-*",
+      "tool-led-*",
+      "tool-resistor-series-*",
+      "tool-resistor-parallel-*",
+      "tool-json-*",
+      "tool-wire-gauge-*",
+      "tool-cores-*",
+      "tool-external-tools-*",
+      "tool-standing-reminder-*",
+      "tool-fitness-*",
+      "tool-transformer-design-*"
+    ],
+    "permissions": [
+      "core:event:allow-listen",
+      "core:event:allow-unlisten"
+    ]
+  },
+  {
+    "identifier": "document-windows",
+    "description": "Trusted local content windows: lifecycle/data events and file pickers for parts attachments, notes and logs. No generic creation, shell or arbitrary URL permissions.",
+    "windows": [
+      "page-parts",
+      "page-parts-*",
+      "page-notes",
+      "page-notes-*",
+      "page-dev-logs",
+      "page-dev-logs-*"
+    ],
+    "permissions": [
+      "core:event:allow-listen",
+      "core:event:allow-unlisten",
+      "dialog:allow-open",
+      "dialog:allow-save"
+    ]
+  },
+  {
+    "identifier": "external-tool-manager",
+    "description": "Native allowlisted external-tools manager windows may select a local executable file; executable launch remains a guarded backend command creating a separate process.",
+    "windows": [
+      "tool-external-tools",
+      "tool-external-tools-*"
+    ],
+    "permissions": [
+      "dialog:allow-open"
+    ]
+  },
+  {
+    "identifier": "transformer-design-dialogs",
+    "description": "Allowlisted transformer record windows select legacy designs and choose PDF or JSON exports. Native commands validate content and protect repository files.",
+    "windows": [
+      "tool-transformer-design",
+      "tool-transformer-design-*"
+    ],
+    "permissions": [
+      "dialog:allow-open",
+      "dialog:allow-save"
+    ]
+  }
+]

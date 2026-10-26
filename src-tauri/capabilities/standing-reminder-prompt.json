@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "standing-reminder-prompt",
+  "description": "One native-created reminder window, event subscriptions only; reminder commands validate the sender and prompt generation.",
+  "windows": [
+    "standing-reminder-prompt"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
+}
