@@ -9,11 +9,11 @@ name: Mirror to Gitee
   workflow_dispatch:
     inputs:
       mode:
-        description: 'sync 实际同步；validate 只跑隔离测试；dry_run 只读校验 GitHub 发布'
+        description: 'sync 同步；validate 隔离测试；dry_run 只读校验；verify_upload 单次隔离上传验证'
         required: true
         default: sync
         type: choice
-        options: [sync, validate, dry_run]
+        options: [sync, validate, dry_run, verify_upload]
       tag:
         description: '补同步正式版本，例如 v0.1.2；留空仅同步代码'
         required: false
@@ -72,7 +72,7 @@ jobs:
         run: python3 scripts/run-gitee-mirror.py --select-releases
 
       - name: Prepare Node.js
-        if: steps.authorization.outputs.run == 'true' && (steps.releases.outputs.tags != '[]' || steps.authorization.outputs.mode == 'validate')
+        if: steps.authorization.outputs.run == 'true' && (steps.releases.outputs.tags != '[]' || steps.authorization.outputs.mode == 'validate' || steps.authorization.outputs.mode == 'verify_upload')
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
@@ -81,9 +81,10 @@ jobs:
       - name: Mirror or validate
         if: steps.authorization.outputs.run == 'true'
         env:
-          GITEE_TOKEN: ${{ steps.authorization.outputs.mode == 'sync' && secrets.GITEE_TOKEN || '' }}
+          GITEE_TOKEN: ${{ (steps.authorization.outputs.mode == 'sync' || steps.authorization.outputs.mode == 'verify_upload') && secrets.GITEE_TOKEN || '' }}
           GITEE_USERNAME: deng-xiangjie
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAGS: ${{ steps.releases.outputs.tags }}
           RUN_MODE: ${{ steps.authorization.outputs.mode }}
+          EVENT_NAME: ${{ github.event_name }}
         run: python3 scripts/run-gitee-mirror.py

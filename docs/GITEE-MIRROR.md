@@ -42,10 +42,16 @@ GitHub 主仓库为 [dengxiangjie12138/perfboard](https://github.com/dengxiangji
 
 ```sh
 python -m unittest discover -s scripts/tests -p test_gitee_mirror.py
-node --test --test-isolation=none scripts/tests/mirror-gitee-release.node-test.mjs
+node --test --test-isolation=none scripts/tests/mirror-gitee-release.node-test.mjs scripts/tests/probe-gitee-upload.node-test.mjs
 ```
 
 工作流通过 `python3 scripts/run-gitee-mirror.py` 执行协调过程；`--authorize-only` 与 `--select-releases` 分别用于授权状态和发布标签选择。模式与标签由 Actions 输入转成环境变量，用户输入不拼进 shell 命令。测试只写临时本地仓库，正式镜像通过工作流运行。
+
+## 单次隔离上传验证
+
+`mode=verify_upload` 仅可手动运行，需要已配置 `GITEE_TOKEN`；`tag` 留空、不要勾选 `seed_history`。它使用固定的已签名 `v0.1.2` 安装包，创建唯一的 `mirror-upload-probe-...` 临时标签和预发布，验证云端实际上传及公开下载的哈希与签名。它不修改正式版本、源码分支或更新索引，也不会自动重试上传。
+
+只有确认临时 Release 已移除后，任务才按原始提交校验并删除自己创建的临时标签。归属发生变化、接口结果无法确认或标签被其他操作更新时，任务停止并在摘要中保留临时标签名称供检查；不会扩大清理范围或删除正式版本。该诊断与同步任务共用同一个串行队列。
 
 ## 代码、发布附件与更新索引
 

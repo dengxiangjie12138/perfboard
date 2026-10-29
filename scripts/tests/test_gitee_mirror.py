@@ -152,6 +152,101 @@ class MirrorTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 mirror.select_releases({"EVENT_NAME": "release", "RELEASE_TAG": tag})
 
+    @contextlib.contextmanager
+    def isolated_probe(self, callback):
+        environment = dict(self.environment, EVENT_NAME="workflow_dispatch", GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT="1")
+        with patch.object(mirror, "REMOTE", str(self.remote)), patch.object(mirror, "PROBE_SOURCE_COMMIT", self.head), \
+                patch.object(mirror.secrets, "token_hex", return_value="a" * 16), \
+                patch.object(mirror, "invoke_upload_probe", side_effect=callback) as invoke:
+            yield environment, invoke
+
+    def acknowledge_probe(self, tag, commit, filename, _environment, verified=True):
+        result = {"schemaVersion": 1, "tag": tag, "sourceCommit": commit, "sourceTag": "v0.1.2",
+                  "releaseId": 123, "releaseMarker": mirror.probe_marker(tag, commit),
+                  "releaseCleanupConfirmed": True, "uploadVerified": verified}
+        filename.write_text(json.dumps(result), encoding="utf-8")
+
+    def test_isolated_upload_probe_creates_and_cleans_only_owned_nonversion_tag(self):
+        def helper(tag, commit, filename, environment):
+            self.assertEqual(self.git("--git-dir", str(self.remote), "rev-parse", "refs/tags/" + tag), commit)
+            self.assertFalse(mirror.STABLE.fullmatch(tag))
+            self.acknowledge_probe(tag, commit, filename, environment)
+        with self.isolated_probe(helper) as (environment, invoke):
+            mirror.verify_upload(self.source, environment)
+        invoke.assert_called_once()
+        self.assertEqual(self.git("--git-dir", str(self.remote), "for-each-ref", "--format=%(refname)"), "")
+        self.assertIn("temporary Release and tag were removed", (self.root / "summary.md").read_text())
+
+    def test_failed_probe_still_removes_owned_tag_only_after_release_cleanup_ack(self):
+        def helper(tag, commit, filename, environment):
+            self.acknowledge_probe(tag, commit, filename, environment, verified=False)
+            raise subprocess.CalledProcessError(1, ["synthetic-node-probe"])
+        with self.isolated_probe(helper) as (environment, _invoke):
+            with self.assertRaises(subprocess.CalledProcessError):
+                mirror.verify_upload(self.source, environment)
+        self.assertEqual(self.git("--git-dir", str(self.remote), "for-each-ref", "--format=%(refname)"), "")
+
+    def test_unknown_probe_cleanup_outcome_preserves_tag_and_reports_it(self):
+        def helper(*_args):
+            raise subprocess.CalledProcessError(1, ["synthetic-node-probe"])
+        with self.isolated_probe(helper) as (environment, _invoke):
+            with self.assertRaisesRegex(ValueError, "cleanup was not confirmed"):
+                mirror.verify_upload(self.source, environment)
+        tag = "mirror-upload-probe-123-1-" + "a" * 16
+        self.assertEqual(self.git("--git-dir", str(self.remote), "rev-parse", "refs/tags/" + tag), self.head)
+        self.assertIn(tag, (self.root / "summary.md").read_text())
+
+    def test_probe_cleanup_ack_rejects_other_tag_commit_marker_and_unconfirmed_absence(self):
+        tag = "mirror-upload-probe-123-1-" + "a" * 16
+        filename = self.root / "probe-result.json"
+        for field, value in [("tag", "v0.1.2"), ("sourceCommit", "0" * 40), ("releaseMarker", "other"),
+                             ("releaseCleanupConfirmed", False), ("uploadVerified", "true"), ("schemaVersion", True)]:
+            self.acknowledge_probe(tag, self.head, filename, self.environment)
+            result = json.loads(filename.read_text())
+            result[field] = value
+            filename.write_text(json.dumps(result))
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                mirror.probe_result(filename, tag, self.head)
+        with self.assertRaises(ValueError):
+            mirror.probe_result(filename, "v0.1.2", self.head)
+
+    def test_probe_cas_cleanup_preserves_a_concurrent_tag_change(self):
+        changed = None
+        def helper(tag, commit, filename, environment):
+            nonlocal changed
+            (self.source / "README.md").write_text("changed fixture\n")
+            self.git("add", ".", cwd=self.source)
+            self.git("commit", "--quiet", "-m", "concurrent fixture", cwd=self.source)
+            changed = self.git("rev-parse", "HEAD", cwd=self.source)
+            self.git("push", "--force", "--quiet", str(self.remote), changed + ":refs/tags/" + tag, cwd=self.source)
+            self.acknowledge_probe(tag, commit, filename, environment)
+        with self.isolated_probe(helper) as (environment, _invoke):
+            with self.assertRaises(mirror.GitFailure):
+                mirror.verify_upload(self.source, environment)
+        self.assertEqual(self.git("--git-dir", str(self.remote), "rev-parse", "refs/tags/mirror-upload-probe-123-1-" + "a" * 16), changed)
+
+    def test_probe_cannot_claim_an_existing_identical_tag(self):
+        tag = "mirror-upload-probe-123-1-" + "a" * 16
+        self.git("push", "--quiet", str(self.remote), self.head + ":refs/tags/" + tag, cwd=self.source)
+        with self.isolated_probe(self.acknowledge_probe) as (environment, invoke):
+            with self.assertRaisesRegex(ValueError, "not newly created"):
+                mirror.verify_upload(self.source, environment)
+        invoke.assert_not_called()
+        self.assertEqual(self.git("--git-dir", str(self.remote), "rev-parse", "refs/tags/" + tag), self.head)
+
+    def test_upload_probe_requires_manual_dispatch_and_fixed_source_before_any_write(self):
+        with self.assertRaisesRegex(ValueError, "manual dispatch"):
+            mirror.verify_upload(self.source, self.environment)
+        for event in ("push", "release"):
+            with self.assertRaises(ValueError):
+                mirror.select_releases({"RUN_MODE": "verify_upload", "EVENT_NAME": event})
+        self.assertEqual(mirror.select_releases({"RUN_MODE": "verify_upload", "EVENT_NAME": "workflow_dispatch"}), [])
+        with self.isolated_probe(self.acknowledge_probe) as (environment, invoke):
+            with patch.object(mirror, "PROBE_SOURCE_COMMIT", "0" * 40), self.assertRaisesRegex(ValueError, "source tag has changed"):
+                mirror.verify_upload(self.source, environment)
+        invoke.assert_not_called()
+        self.assertEqual(self.git("--git-dir", str(self.remote), "for-each-ref", "--format=%(refname)"), "")
+
 
 if __name__ == "__main__":
     unittest.main()

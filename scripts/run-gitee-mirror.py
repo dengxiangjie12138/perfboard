@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import shlex
 import subprocess
 import sys
@@ -15,6 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 REMOTE = "https://gitee.com/deng-xiangjie/perfboard.git"
 INDEX_REF = "refs/heads/gitee-updates"
 STABLE = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
+PROBE_TAG = re.compile(r"mirror-upload-probe-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{16}\Z")
+PROBE_SOURCE_COMMIT = "82a1c0af8c1ff950604a8b293093e71abd7ae920"
 
 
 def append_summary(environment: dict[str, str], text: str) -> None:
@@ -26,9 +29,9 @@ def append_summary(environment: dict[str, str], text: str) -> None:
 
 def authorize(environment: dict[str, str]) -> bool:
     mode = environment.get("RUN_MODE", "sync")
-    if mode not in ("sync", "validate", "dry_run"):
+    if mode not in ("sync", "validate", "dry_run", "verify_upload"):
         raise ValueError("Unsupported mirror mode.")
-    allowed = mode != "sync" or bool(environment.get("GITEE_TOKEN", "").strip())
+    allowed = mode not in ("sync", "verify_upload") or bool(environment.get("GITEE_TOKEN", "").strip())
     if environment.get("GITHUB_OUTPUT"):
         with open(environment["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             output.write("mode=" + mode + "\nrun=" + str(allowed).lower() + "\n")
@@ -40,6 +43,10 @@ def authorize(environment: dict[str, str]) -> bool:
 
 
 def select_releases(environment: dict[str, str]) -> list[str]:
+    if environment.get("RUN_MODE") == "verify_upload":
+        if environment.get("EVENT_NAME") != "workflow_dispatch":
+            raise ValueError("Upload verification is available only through manual workflow dispatch.")
+        return []
     tags: set[str] = set()
     if environment.get("EVENT_NAME") == "release":
         tags.add(environment.get("RELEASE_TAG", ""))
@@ -163,6 +170,86 @@ def credential_environment(directory: Path, environment: dict[str, str]) -> dict
     return child
 
 
+def probe_marker(tag: str, commit: str) -> str:
+    return "<!-- perfboard-upload-probe:v1 tag=" + tag + " source=dengxiangjie12138/perfboard commit=" + commit + " -->"
+
+
+def probe_result(filename: Path, tag: str, commit: str) -> dict | None:
+    if not filename.exists():
+        return None
+    if filename.is_symlink() or not filename.is_file() or filename.stat().st_size > 64 * 1024:
+        raise ValueError("Upload probe cleanup acknowledgement is not a bounded regular file.")
+    result = json.loads(filename.read_text(encoding="utf-8"))
+    if not isinstance(result, dict):
+        raise ValueError("Upload probe cleanup acknowledgement is invalid.")
+    release_id = result.get("releaseId")
+    if (not PROBE_TAG.fullmatch(tag) or type(result.get("schemaVersion")) is not int or result.get("schemaVersion") != 1
+            or result.get("tag") != tag or result.get("sourceCommit") != commit
+            or result.get("sourceTag") != "v0.1.2" or result.get("releaseMarker") != probe_marker(tag, commit)
+            or result.get("releaseCleanupConfirmed") is not True
+            or type(result.get("uploadVerified")) is not bool
+            or (release_id is not None and (type(release_id) is not int or release_id <= 0))):
+        raise ValueError("Upload probe cleanup ownership was not confirmed; preserving the temporary tag.")
+    return result
+
+
+def invoke_upload_probe(tag: str, commit: str, filename: Path, environment: dict[str, str]) -> None:
+    subprocess.run(["node", str(ROOT / "scripts/probe-gitee-upload.mjs"), "--tag", tag,
+                    "--source-commit", commit, "--result-file", str(filename)],
+                   env=environment, check=True, cwd=ROOT)
+
+
+def verify_upload(source: Path, environment: dict[str, str]) -> None:
+    if environment.get("EVENT_NAME") != "workflow_dispatch" or not environment.get("GITEE_TOKEN", "").strip():
+        raise ValueError("Upload verification requires a manual dispatch with GITEE_TOKEN.")
+    run_id, attempt = environment.get("GITHUB_RUN_ID", ""), environment.get("GITHUB_RUN_ATTEMPT", "")
+    if not all(re.fullmatch(r"[1-9][0-9]*", value) for value in (run_id, attempt)):
+        raise ValueError("Upload verification requires trusted GitHub run identifiers.")
+    tag = "mirror-upload-probe-" + run_id + "-" + attempt + "-" + secrets.token_hex(8)
+    if not PROBE_TAG.fullmatch(tag) or STABLE.fullmatch(tag):
+        raise ValueError("Upload verification cannot use a production version tag.")
+    reference = "refs/tags/" + tag
+    with tempfile.TemporaryDirectory(prefix="perfboard-gitee-probe-", dir=environment.get("RUNNER_TEMP")) as temporary:
+        child = credential_environment(Path(temporary), environment)
+        child["GIT_TRACE"] = child["GIT_TRACE_CURL"] = "0"
+        child.pop("GIT_CURL_VERBOSE", None)
+        git = Git(child)
+        actual = git("rev-parse", "--verify", "refs/tags/v0.1.2^{commit}", cwd=source).stdout.strip()
+        if actual != PROBE_SOURCE_COMMIT:
+            raise ValueError("The fixed upload probe source tag has changed; no writes were started.")
+        print("Creating isolated non-version upload probe tag " + tag, flush=True)
+        try:
+            pushed = git("push", "--porcelain", "--force-with-lease=" + reference + ":", REMOTE,
+                         PROBE_SOURCE_COMMIT + ":" + reference, cwd=source)
+            # Git can report an identical existing tag as up-to-date despite an
+            # expected-absent lease. Only a confirmed new tag grants ownership.
+            if not any(line.startswith("*\t") and line.split("\t")[1].endswith(":" + reference)
+                       for line in pushed.stdout.splitlines() if "\t" in line):
+                raise ValueError("The isolated probe tag was not newly created; no Release was touched.")
+        except (GitFailure, ValueError, subprocess.SubprocessError):
+            append_summary(environment, "### Gitee upload verification stopped\n\nTemporary tag creation was not confirmed: `" + tag + "`. No Release upload was started.")
+            raise
+        filename = Path(temporary) / "cleanup-result.json"
+        try:
+            invoke_upload_probe(tag, PROBE_SOURCE_COMMIT, filename, child)
+        finally:
+            result = probe_result(filename, tag, PROBE_SOURCE_COMMIT)
+            if result is None:
+                append_summary(environment, "### Gitee upload verification needs cleanup\n\nRelease absence was not confirmed. Temporary tag preserved: `" + tag + "`. Production releases and update indexes were not modified.")
+                raise ValueError("Release cleanup was not confirmed; preserving isolated tag " + tag)
+            try:
+                git("push", "--porcelain", "--force-with-lease=" + reference + ":" + PROBE_SOURCE_COMMIT,
+                    REMOTE, ":" + reference, cwd=source)
+            except (GitFailure, subprocess.SubprocessError):
+                append_summary(environment, "### Gitee upload verification needs cleanup\n\nThe owned Release is absent, but temporary tag deletion was not confirmed: `" + tag + "`. No different tag value was overwritten.")
+                raise
+            append_summary(environment, "### Gitee isolated upload verification\n\n"
+                           + ("Signed installer upload verified. " if result["uploadVerified"] else "Installer upload did not pass verification. ")
+                           + "Owned temporary Release and tag were removed. Production releases and update indexes were not modified.")
+        if not result["uploadVerified"]:
+            raise ValueError("The isolated installer upload did not pass verification; temporary resources were removed.")
+
+
 def sync(tags: list[str], source: Path, environment: dict[str, str], remote: str = REMOTE) -> None:
     if not environment.get("GITEE_TOKEN", "").strip():
         raise ValueError("Mirror authorization is unavailable; no writes were started.")
@@ -218,7 +305,8 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("Invalid release selection; no writes were started.")
         if mode == "validate":
             subprocess.run([sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_gitee_mirror.py"], check=True, cwd=ROOT)
-            subprocess.run(["node", "--test", "--test-isolation=none", "scripts/tests/mirror-gitee-release.node-test.mjs"], check=True, cwd=ROOT)
+            subprocess.run(["node", "--test", "--test-isolation=none", "scripts/tests/mirror-gitee-release.node-test.mjs",
+                            "scripts/tests/probe-gitee-upload.node-test.mjs"], check=True, cwd=ROOT)
             append_summary(environment, "### Gitee mirror validation passed\n\n仅运行隔离测试，未同步远程仓库或创建 Gitee 发布。")
         elif mode == "dry_run":
             if not tags:
@@ -229,6 +317,10 @@ def main(argv: list[str] | None = None) -> int:
                 for tag in tags:
                     mirror_release(tag, Path(temporary), child, dry_run=True)
             append_summary(environment, "### Gitee mirror dry run completed\n\n仅只读校验 GitHub 发布与签名，未同步 Git、上传附件或写入 Gitee 索引。")
+        elif mode == "verify_upload":
+            if tags:
+                raise ValueError("Isolated upload verification cannot select production releases.")
+            verify_upload(ROOT, environment)
         else:
             sync(tags, ROOT, environment)
         return 0

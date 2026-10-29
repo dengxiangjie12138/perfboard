@@ -171,11 +171,12 @@ export async function uploadGiteeMultipart(value, options, {requestImpl = httpsR
 }
 
 /** Curl negotiates its own transport; credentials exist only in stdin's multipart body. */
-export async function uploadGiteeCurl(value, options, {spawnImpl = spawnProcess} = {}) {
+export async function uploadGiteeCurl(value, options, {spawnImpl = spawnProcess, ipv4 = false, timeoutMs = UPLOAD_TIMEOUT_MS} = {}) {
+  requireValue(Number.isInteger(timeoutMs) && timeoutMs >= 1000 && timeoutMs <= UPLOAD_TIMEOUT_MS, 'Invalid bounded upload timeout');
   const {url, signal, bytes, contentType} = await encodeGiteeMultipart(value, options);
   const marker = '\nPERFBOARD_HTTP_STATUS:';
   const arguments_ = ['--disable', '--silent', '--show-error', '--proto', '=https', '--proto-redir', '=https',
-    '--request', 'POST', '--max-time', String(UPLOAD_TIMEOUT_MS / 1000), '--connect-timeout', '30',
+    ...(ipv4 ? ['--ipv4'] : []), '--request', 'POST', '--max-time', String(timeoutMs / 1000), '--connect-timeout', '30',
     '--expect100-timeout', '1', '--header', 'Content-Type: ' + contentType,
     '--header', 'Content-Length: ' + bytes.length, '--header', 'Accept: application/json',
     '--header', 'Accept-Encoding: identity', '--user-agent', 'Perfboard-Release-Mirror',
@@ -508,3 +509,5 @@ async function main(args) {
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   main(process.argv.slice(2)).catch(error => {console.error(`Gitee mirror failed: ${error.message}`); process.exitCode = 1});
 }
+
+export {githubRelease as readVerifiedGithubRelease, targetTag as verifyGiteeTag};
