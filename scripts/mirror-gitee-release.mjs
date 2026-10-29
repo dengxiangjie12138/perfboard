@@ -4,6 +4,7 @@ import {createHash} from 'node:crypto';
 import {mkdir, readFile, rename, writeFile} from 'node:fs/promises';
 import {request as httpsRequest} from 'node:https';
 import {spawn as spawnProcess} from 'node:child_process';
+import {isIP} from 'node:net';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {verifySignature} from './prepare-update-release.mjs';
@@ -19,6 +20,8 @@ const MINIMUM = [0, 1, 1];
 const API_TIMEOUT_MS = 180_000;
 const UPLOAD_TIMEOUT_MS = 600_000;
 const MAX_MULTIPART = MAX_EXE + 128 * 1024;
+const CURL_METRICS = '\nPERFBOARD_CURL_METRICS:';
+const CURL_METRICS_LIMIT = 512;
 const NETWORK_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET']);
 
 function networkFailure(context, error, timeout) {
@@ -175,12 +178,13 @@ export async function uploadGiteeCurl(value, options, {spawnImpl = spawnProcess,
   requireValue(Number.isInteger(timeoutMs) && timeoutMs >= 1000 && timeoutMs <= UPLOAD_TIMEOUT_MS, 'Invalid bounded upload timeout');
   const {url, signal, bytes, contentType} = await encodeGiteeMultipart(value, options);
   const marker = '\nPERFBOARD_HTTP_STATUS:';
+  const metricsFormat = CURL_METRICS + '%{size_upload},%{time_connect},%{time_appconnect},%{time_starttransfer},%{time_total},%{remote_ip},%{http_version}';
   const arguments_ = ['--disable', '--silent', '--show-error', '--proto', '=https', '--proto-redir', '=https',
     ...(ipv4 ? ['--ipv4'] : []), '--request', 'POST', '--max-time', String(timeoutMs / 1000), '--connect-timeout', '30',
     '--expect100-timeout', '1', '--header', 'Content-Type: ' + contentType,
     '--header', 'Content-Length: ' + bytes.length, '--header', 'Accept: application/json',
     '--header', 'Accept-Encoding: identity', '--user-agent', 'Perfboard-Release-Mirror',
-    '--data-binary', '@-', '--write-out', marker + '%{http_code}', '--url', url.href];
+    '--data-binary', '@-', '--write-out', metricsFormat + marker + '%{http_code}', '--url', url.href];
   const environment = {...process.env};
   for (const name of ['GITEE_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN']) delete environment[name];
   return new Promise((resolve, reject) => {
@@ -213,7 +217,7 @@ export async function uploadGiteeCurl(value, options, {spawnImpl = spawnProcess,
       });
       child.stdout.on('data', chunk => {
         length += chunk.length;
-        if (length > MAX_JSON + marker.length + 3) {stop(new Error('Remote response exceeds the allowed size')); return}
+        if (length > MAX_JSON + CURL_METRICS_LIMIT + marker.length + 3) {stop(new Error('Remote response exceeds the allowed size')); return}
         chunks.push(Buffer.from(chunk));
       });
       // Drain and bound stderr; curl may include URLs/headers in errors, so it
@@ -229,6 +233,22 @@ export async function uploadGiteeCurl(value, options, {spawnImpl = spawnProcess,
       });
       child.stdin.once('finish', () => options.onProgress?.(`Gitee curl request body handed to transport (${bytes.length} bytes); waiting for response`));
       child.once('close', code => {
+        let output = Buffer.concat(chunks), metricsIndex = output.lastIndexOf(CURL_METRICS);
+        if (metricsIndex >= 0 && output.length - metricsIndex <= CURL_METRICS_LIMIT + marker.length + 3) {
+          const footer = output.subarray(metricsIndex).toString('ascii');
+          const metricsEnd = footer.indexOf(marker, CURL_METRICS.length);
+          const values = metricsEnd < 0 ? [] : footer.slice(CURL_METRICS.length, metricsEnd).split(',');
+          const statusValue = metricsEnd < 0 ? '' : footer.slice(metricsEnd + marker.length);
+          if (/^\d{3}$/.test(statusValue) && values.length === 7 && values.slice(0, 5).every(value => /^\d+(?:\.\d+)?$/.test(value))
+            && (values[5] === '' || isIP(values[5])) && /^(?:0|1(?:\.\d+)?|2|3)$/.test(values[6])) {
+            const numbers = values.slice(0, 5).map(Number);
+            if (numbers.every(Number.isFinite) && numbers[0] <= MAX_MULTIPART && numbers.slice(1).every(value => value <= 3600)) {
+              options.onProgress?.('Gitee curl transfer metrics ' + JSON.stringify({uploadBytes: numbers[0], connectSeconds: numbers[1], tlsSeconds: numbers[2], firstByteSeconds: numbers[3], totalSeconds: numbers[4], remoteIp: values[5] || null, httpVersion: values[6], httpStatus: Number(statusValue)}));
+              // Strip only the trusted-format write-out footer, never log the response body.
+              output = Buffer.concat([output.subarray(0, metricsIndex), output.subarray(metricsIndex + metricsEnd)]);
+            }
+          }
+        }
         if (failure) {finish(failure); return}
         if (code !== 0) {
           const error = new Error('Curl upload failed');
@@ -237,7 +257,6 @@ export async function uploadGiteeCurl(value, options, {spawnImpl = spawnProcess,
           finish(error); return;
         }
         try {
-          const output = Buffer.concat(chunks);
           const suffix = output.subarray(-marker.length - 3).toString('ascii');
           requireValue(suffix.startsWith(marker) && /^\d{3}$/.test(suffix.slice(marker.length)), 'Curl returned no valid HTTP status');
           const status = Number(suffix.slice(marker.length));

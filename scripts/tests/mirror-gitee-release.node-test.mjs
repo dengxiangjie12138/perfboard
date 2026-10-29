@@ -444,7 +444,7 @@ test('native upload rejects other origins and API paths before opening a request
   assert.equal(fixture.calls[0].url.origin, 'https://gitee.com');
 });
 
-function curlFixture({status = 201, body = '{"id":1}', code = 0, stderr = '', stall = false, pipeError = false} = {}) {
+function curlFixture({status = 201, body = '{"id":1}', code = 0, stderr = '', stall = false, pipeError = false, metrics = ''} = {}) {
   const calls = [];
   const spawnImpl = (command, args, options) => {
     const child = new EventEmitter();
@@ -464,7 +464,7 @@ function curlFixture({status = 201, body = '{"id":1}', code = 0, stderr = '', st
         const error = new Error('sensitive input error fake-gitee-token'); error.code = 'EPIPE';
         child.stdin.emit('error', error); return;
       }
-      child.stdout.end(Buffer.concat([Buffer.from(body), Buffer.from('\nPERFBOARD_HTTP_STATUS:' + status)]));
+      child.stdout.end(Buffer.concat([Buffer.from(body), Buffer.from(metrics ? '\nPERFBOARD_CURL_METRICS:' + metrics : ''), Buffer.from('\nPERFBOARD_HTTP_STATUS:' + status)]));
       child.stderr.end(stderr);
       queueMicrotask(() => child.emit('close', code));
     }));
@@ -528,7 +528,7 @@ test('curl total abort kills and reaps the process while waiting for a response'
 });
 
 test('curl bounds stdout and stderr and refuses other origins before spawning', async () => {
-  for (const settings of [{body: Buffer.alloc(4 * 1024 * 1024 + 1)}, {stderr: 'x'.repeat(16 * 1024 + 1)}]) {
+  for (const settings of [{body: Buffer.alloc(4 * 1024 * 1024 + 1024)}, {stderr: 'x'.repeat(16 * 1024 + 1)}]) {
     const fixture = curlFixture(settings);
     await assert.rejects(uploadGiteeCurl(uploadUrl, nativeOptions(), fixture), /exceeds the allowed size|error output exceeded/);
     assert.equal(fixture.calls[0].child.killed, true);
@@ -536,4 +536,15 @@ test('curl bounds stdout and stderr and refuses other origins before spawning', 
   const fixture = curlFixture();
   await assert.rejects(uploadGiteeCurl('https://evil.invalid/upload', nativeOptions(), fixture), /fixed Gitee attachment API/);
   assert.equal(fixture.calls.length, 0);
+});
+
+test('curl diagnostics expose only validated numeric transfer metrics on success and timeout', async () => {
+  for (const code of [0, 28]) {
+    const fixture = curlFixture({code, status: code ? '000' : '201', metrics: '262144,0.1,0.3,0.4,110.01,203.0.113.5,2', stderr: 'Authorization fake-gitee-token'}), messages = [];
+    const pending = uploadGiteeCurl(uploadUrl, {...nativeOptions(), onProgress: message => messages.push(message)}, fixture);
+    if (code) await assert.rejects(pending); else assert.deepEqual(await (await pending).json(), {id: 1});
+    const metrics = messages.find(message => message.startsWith('Gitee curl transfer metrics '));
+    assert.deepEqual(JSON.parse(metrics.slice('Gitee curl transfer metrics '.length)), {uploadBytes: 262144, connectSeconds: 0.1, tlsSeconds: 0.3, firstByteSeconds: 0.4, totalSeconds: 110.01, remoteIp: '203.0.113.5', httpVersion: '2', httpStatus: code ? 0 : 201});
+    assert.ok(messages.every(message => !message.includes('fake-gitee-token') && !message.includes('Authorization') && !message.includes('https://')));
+  }
 });
