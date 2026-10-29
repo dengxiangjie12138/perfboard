@@ -3,6 +3,7 @@
 import {createHash} from 'node:crypto';
 import {mkdir, readFile, rename, writeFile} from 'node:fs/promises';
 import {request as httpsRequest} from 'node:https';
+import {spawn as spawnProcess} from 'node:child_process';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {verifySignature} from './prepare-update-release.mjs';
@@ -23,7 +24,7 @@ const NETWORK_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_A
 function networkFailure(context, error, timeout) {
   // Node errors can embed full URLs, headers or credentials in their message.
   // Report only fixed error names/codes, without retaining the original cause.
-  const code = [error?.code, error?.cause?.code].find(value => NETWORK_CODES.has(value));
+  const code = [error?.code, error?.cause?.code].find(value => NETWORK_CODES.has(value) || /^CURL_EXIT_[1-9][0-9]{0,2}$/.test(value ?? ''));
   const name = ['TimeoutError', 'AbortError', 'TypeError', 'Error'].includes(error?.name) ? error.name : 'NetworkError';
   const timedOut = ['TimeoutError', 'AbortError'].includes(name) || code?.includes('TIMEOUT') || code === 'ETIMEDOUT';
   return new Error(`${context} ${timedOut ? 'timed out' : 'request failed'} (${name}${code ? '; ' + code : ''}; request limit ${timeout / 1000}s)`);
@@ -79,8 +80,7 @@ async function responseBytes(response, limit) {
   return Buffer.concat(chunks);
 }
 
-/** Fixed-origin upload transport without fetch/Undici's separate header deadline. */
-export async function uploadGiteeMultipart(value, options, {requestImpl = httpsRequest} = {}) {
+async function encodeGiteeMultipart(value, options) {
   const url = httpsUrl(value);
   requireValue(url.origin === 'https://gitee.com' && !url.search && !url.hash
     && new RegExp(`^/api/v5/repos/${TARGET}/releases/[1-9][0-9]*/attach_files$`).test(url.pathname)
@@ -97,8 +97,14 @@ export async function uploadGiteeMultipart(value, options, {requestImpl = httpsR
   const bytes = Buffer.from(await encoded.arrayBuffer());
   requireValue(bytes.length <= MAX_MULTIPART, 'Multipart request exceeds the allowed size');
   signal.throwIfAborted();
+  return {url, signal, bytes, contentType: encoded.headers.get('Content-Type')};
+}
+
+/** Fixed-origin upload transport without fetch/Undici's separate header deadline. */
+export async function uploadGiteeMultipart(value, options, {requestImpl = httpsRequest} = {}) {
+  const {url, signal, bytes, contentType} = await encodeGiteeMultipart(value, options);
   const headers = new Headers(options.headers);
-  headers.set('Content-Type', encoded.headers.get('Content-Type'));
+  headers.set('Content-Type', contentType);
   headers.set('Content-Length', String(bytes.length));
   headers.set('Accept-Encoding', 'identity');
   // The signal starts before encoding and covers body upload, response headers,
@@ -164,8 +170,90 @@ export async function uploadGiteeMultipart(value, options, {requestImpl = httpsR
   });
 }
 
+/** Curl negotiates its own transport; credentials exist only in stdin's multipart body. */
+export async function uploadGiteeCurl(value, options, {spawnImpl = spawnProcess} = {}) {
+  const {url, signal, bytes, contentType} = await encodeGiteeMultipart(value, options);
+  const marker = '\nPERFBOARD_HTTP_STATUS:';
+  const arguments_ = ['--disable', '--silent', '--show-error', '--proto', '=https', '--proto-redir', '=https',
+    '--request', 'POST', '--max-time', String(UPLOAD_TIMEOUT_MS / 1000), '--connect-timeout', '30',
+    '--expect100-timeout', '1', '--header', 'Content-Type: ' + contentType,
+    '--header', 'Content-Length: ' + bytes.length, '--header', 'Accept: application/json',
+    '--header', 'Accept-Encoding: identity', '--user-agent', 'Perfboard-Release-Mirror',
+    '--data-binary', '@-', '--write-out', marker + '%{http_code}', '--url', url.href];
+  const environment = {...process.env};
+  for (const name of ['GITEE_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN']) delete environment[name];
+  return new Promise((resolve, reject) => {
+    let child, failure, completed = false, length = 0, errorLength = 0;
+    const chunks = [];
+    const finish = (error, response) => {
+      if (completed) return;
+      completed = true;
+      signal.removeEventListener('abort', abort);
+      if (error) reject(error); else resolve(response);
+    };
+    const stop = error => {
+      failure ??= error;
+      child?.stdin.destroy();
+      if (child?.pid && !child.killed) child.kill('SIGKILL');
+    };
+    const abort = () => {
+      const error = new Error('Upload deadline reached'); error.name = 'AbortError';
+      stop(error);
+    };
+    try {
+      signal.throwIfAborted();
+      child = spawnImpl(process.platform === 'win32' ? 'curl.exe' : 'curl', arguments_,
+        {stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: environment});
+      signal.addEventListener('abort', abort, {once: true});
+      child.once('error', error => {
+        const safe = new Error('Curl process could not start');
+        safe.code = NETWORK_CODES.has(error?.code) ? error.code : undefined;
+        finish(safe);
+      });
+      child.stdout.on('data', chunk => {
+        length += chunk.length;
+        if (length > MAX_JSON + marker.length + 3) {stop(new Error('Remote response exceeds the allowed size')); return}
+        chunks.push(Buffer.from(chunk));
+      });
+      // Drain and bound stderr; curl may include URLs/headers in errors, so it
+      // must never be returned, logged, or retained as an exception cause.
+      child.stderr.on('data', chunk => {
+        errorLength += chunk.length;
+        if (errorLength > 16 * 1024) stop(new Error('Curl error output exceeded its bound'));
+      });
+      for (const stream of [child.stdout, child.stderr]) stream.once('error', () => stop(new Error('Curl output pipe failed')));
+      child.stdin.once('error', error => {
+        const safe = new Error('Curl input pipe failed'); safe.code = error?.code === 'EPIPE' ? 'ECONNRESET' : undefined;
+        stop(safe);
+      });
+      child.stdin.once('finish', () => options.onProgress?.(`Gitee curl request body handed to transport (${bytes.length} bytes); waiting for response`));
+      child.once('close', code => {
+        if (failure) {finish(failure); return}
+        if (code !== 0) {
+          const error = new Error('Curl upload failed');
+          if (Number.isInteger(code) && code > 0 && code <= 255) error.code = 'CURL_EXIT_' + code;
+          if (code === 28) error.name = 'TimeoutError';
+          finish(error); return;
+        }
+        try {
+          const output = Buffer.concat(chunks);
+          const suffix = output.subarray(-marker.length - 3).toString('ascii');
+          requireValue(suffix.startsWith(marker) && /^\d{3}$/.test(suffix.slice(marker.length)), 'Curl returned no valid HTTP status');
+          const status = Number(suffix.slice(marker.length));
+          requireValue(status >= 200 && status <= 599, 'Curl returned an invalid HTTP status');
+          const body = output.subarray(0, -marker.length - 3);
+          requireValue(body.length <= MAX_JSON, 'Remote response exceeds the allowed size');
+          finish(null, new Response([204, 205, 304].includes(status) ? null : body, {status, headers: {'Content-Type': 'application/json'}}));
+        } catch (error) {finish(error)}
+      });
+      if (signal.aborted) {abort(); return}
+      child.stdin.end(bytes);
+    } catch (error) {if (child?.pid) stop(error); else finish(error)}
+  });
+}
+
 export class MirrorHttp {
-  constructor({fetchImpl = globalThis.fetch, uploadImpl = uploadGiteeMultipart, githubToken, giteeToken, onProgress = () => {}} = {}) {
+  constructor({fetchImpl = globalThis.fetch, uploadImpl = uploadGiteeCurl, githubToken, giteeToken, onProgress = () => {}} = {}) {
     this.fetch = fetchImpl;
     this.githubToken = githubToken;
     this.giteeToken = giteeToken;

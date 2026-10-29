@@ -6,7 +6,7 @@ import {test} from 'node:test';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
 import assert from 'node:assert/strict';
-import {mirrorRelease, MirrorHttp, uploadGiteeMultipart, SOURCE, TARGET} from '../mirror-gitee-release.mjs';
+import {mirrorRelease, MirrorHttp, uploadGiteeMultipart, uploadGiteeCurl, SOURCE, TARGET} from '../mirror-gitee-release.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = (body, status = 200) => new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}});
@@ -418,4 +418,98 @@ test('native upload rejects other origins and API paths before opening a request
   await assert.rejects(http.api('gitee', 'POST', '/releases/1/attach_files', nativeOptions().body), /HTTP 302/);
   assert.equal(fixture.calls.length, 1);
   assert.equal(fixture.calls[0].url.origin, 'https://gitee.com');
+});
+
+function curlFixture({status = 201, body = '{"id":1}', code = 0, stderr = '', stall = false, pipeError = false} = {}) {
+  const calls = [];
+  const spawnImpl = (command, args, options) => {
+    const child = new EventEmitter();
+    Object.assign(child, {pid: 12345, killed: false, stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough()});
+    child.kill = signal => {
+      child.killed = true;
+      child.killSignal = signal;
+      queueMicrotask(() => child.emit('close', null));
+      return true;
+    };
+    const call = {command, args, options, child, chunks: []};
+    calls.push(call);
+    child.stdin.on('data', chunk => call.chunks.push(Buffer.from(chunk)));
+    child.stdin.once('finish', () => queueMicrotask(() => {
+      if (child.killed || stall) return;
+      if (pipeError) {
+        const error = new Error('sensitive input error fake-gitee-token'); error.code = 'EPIPE';
+        child.stdin.emit('error', error); return;
+      }
+      child.stdout.end(Buffer.concat([Buffer.from(body), Buffer.from('\nPERFBOARD_HTTP_STATUS:' + status)]));
+      child.stderr.end(stderr);
+      queueMicrotask(() => child.emit('close', code));
+    }));
+    return child;
+  };
+  return {calls, spawnImpl};
+}
+
+test('curl upload keeps credentials in stdin, disables config/redirects and preserves exact multipart bytes', async () => {
+  const fixture = curlFixture();
+  const response = await uploadGiteeCurl(uploadUrl, nativeOptions(), fixture);
+  assert.deepEqual(await response.json(), {id: 1});
+  assert.equal(fixture.calls.length, 1);
+  const {command, args, options, chunks} = fixture.calls[0];
+  assert.ok(command === 'curl' || command === 'curl.exe');
+  assert.equal(args[0], '--disable');
+  assert.ok(args.includes('@-') && args.includes('--data-binary'));
+  assert.ok(!args.includes('-L') && !args.includes('--location') && !args.includes('--insecure'));
+  assert.ok(args.includes('=https') && args.includes('600') && args.includes('30'));
+  assert.equal(args[args.indexOf('--url') + 1], uploadUrl);
+  assert.ok(!JSON.stringify(args).includes('fake-gitee-token') && !JSON.stringify(args).includes('Bearer') && !JSON.stringify(args).includes('access_token'));
+  assert.equal(options.windowsHide, true);
+  for (const key of ['GITEE_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN']) assert.equal(options.env[key], undefined);
+  const bytes = Buffer.concat(chunks);
+  const contentType = args.find(value => value.startsWith('Content-Type: ')).slice('Content-Type: '.length);
+  assert.ok(args.includes('Content-Length: ' + bytes.length));
+  const decoded = await new Response(bytes, {headers: {'Content-Type': contentType}}).formData();
+  assert.equal(decoded.get('access_token'), 'fake-gitee-token');
+  assert.equal(await decoded.get('file').text(), 'synthetic signed installer');
+});
+
+test('curl upload reports HTTP redirects without following them and preserves HTTP error codes', async () => {
+  for (const status of [302, 413, 502]) {
+    const fixture = curlFixture({status});
+    const http = new MirrorHttp({giteeToken: 'fake-gitee-token', uploadImpl: (url, options) => uploadGiteeCurl(url, options, fixture)});
+    await assert.rejects(http.api('gitee', 'POST', '/releases/1/attach_files', nativeOptions().body), new RegExp('HTTP ' + status));
+    assert.equal(fixture.calls.length, 1);
+  }
+});
+
+test('curl timeouts and pipe errors expose only safe categories, never stderr or original error messages', async () => {
+  for (const settings of [{code: 28, stderr: 'secret Authorization: Bearer fake-gitee-token'}, {pipeError: true}]) {
+    const fixture = curlFixture(settings);
+    const http = new MirrorHttp({giteeToken: 'fake-gitee-token', uploadImpl: (url, options) => uploadGiteeCurl(url, options, fixture)});
+    await assert.rejects(http.api('gitee', 'POST', '/releases/1/attach_files', nativeOptions().body), error => {
+      assert.match(error.message, settings.code === 28 ? /timed out.*CURL_EXIT_28/ : /ECONNRESET/);
+      assert.ok(!error.message.includes('fake-gitee-token') && !error.message.includes('Authorization') && !error.message.includes('sensitive'));
+      assert.equal(error.cause, undefined); return true;
+    });
+    assert.equal(fixture.calls.length, 1);
+  }
+});
+
+test('curl total abort kills and reaps the process while waiting for a response', async () => {
+  const fixture = curlFixture({stall: true}), controller = new AbortController();
+  const pending = uploadGiteeCurl(uploadUrl, nativeOptions(controller.signal), fixture);
+  const timer = setTimeout(() => controller.abort(), 15);
+  try {await assert.rejects(pending, /deadline reached/)} finally {clearTimeout(timer)}
+  assert.equal(fixture.calls[0].child.killed, true);
+  assert.equal(fixture.calls[0].child.killSignal, 'SIGKILL');
+});
+
+test('curl bounds stdout and stderr and refuses other origins before spawning', async () => {
+  for (const settings of [{body: Buffer.alloc(4 * 1024 * 1024 + 1)}, {stderr: 'x'.repeat(16 * 1024 + 1)}]) {
+    const fixture = curlFixture(settings);
+    await assert.rejects(uploadGiteeCurl(uploadUrl, nativeOptions(), fixture), /exceeds the allowed size|error output exceeded/);
+    assert.equal(fixture.calls[0].child.killed, true);
+  }
+  const fixture = curlFixture();
+  await assert.rejects(uploadGiteeCurl('https://evil.invalid/upload', nativeOptions(), fixture), /fixed Gitee attachment API/);
+  assert.equal(fixture.calls.length, 0);
 });
