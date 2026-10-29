@@ -3,14 +3,19 @@ param(
   [Parameter(Mandatory)][string]$ValidationRoot,
   [string]$ToolsRoot = (Join-Path $env:TEMP 'perfboard-nsis-validation'),
   [string]$PreviousApplicationExe,
-  [string]$ExpectedApplicationVersion = '0.1.1',
+  [string]$ExpectedApplicationVersion,
   [ValidatePattern('^PerfboardUpdateValidation-[0-9a-fA-F]{32}$')][string]$ValidationProductName,
   [ValidateSet('PerfboardValidation','perfboard')][string]$ValidationManufacturer = 'PerfboardValidation',
   [ValidatePattern('^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$')][string]$InitialVersion = '0.0.1',
   [ValidatePattern('^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$')][string]$UpdateVersion = '0.0.2',
+  [switch]$AllowDowngrades,
   [switch]$Execute
 )
 $ErrorActionPreference = 'Stop'
+if (!$ExpectedApplicationVersion) {
+  $configuration = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $PSScriptRoot '..\tauri.conf.json') | ConvertFrom-Json
+  $ExpectedApplicationVersion = $configuration.version
+}
 $compiler = Join-Path $ToolsRoot 'nsis-3.11\makensis.exe'
 if (!(Test-Path -LiteralPath $compiler)) { throw 'Supply ToolsRoot with the official NSIS 3.11 and Tauri includes/plugins.' }
 if (!(Test-Path -LiteralPath $ApplicationExe -PathType Leaf)) { throw 'ApplicationExe must be an existing application build.' }
@@ -66,7 +71,7 @@ function Build-ValidationInstaller([string]$Version, [string]$Payload, [string]$
     main_binary_name='perfboard'; main_binary_path=([IO.Path]::GetFullPath($Payload))
     bundle_id=('com.perfboard.validation.' + $token); out_file=$Output
     arch='x64'; additional_plugins_path=(Join-Path $ToolsRoot 'nsis-3.11\Plugins\x86-unicode\additional')
-    allow_downgrades='false'; display_language_selector='false'
+    allow_downgrades=$(if ($AllowDowngrades) {'true'} else {'false'}); display_language_selector='false'
     # Skip runtime installation completely; tests never launch a WebView.
     install_webview2_mode='skip'; estimated_size='1024'
   }

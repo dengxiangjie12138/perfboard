@@ -20,12 +20,20 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 import uuid
 
 WORKSPACE = Path(__file__).resolve().parents[1]
 PRODUCT = re.compile(r"^PerfboardUpdateValidation-[0-9a-f]{32}$")
 PATH_FIELDS = ("programDirectory", "applicationConfigDirectory", "repositoryDirectory", "initialInstaller", "updateInstaller")
+VERSION = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+
+
+def version_key(value):
+    if not isinstance(value, str) or not VERSION.fullmatch(value):
+        raise ValueError("Fixture versions must be stable semantic versions")
+    return tuple(map(int, value.split(".")))
 
 
 def under(path: Path, root: Path) -> Path:
@@ -42,7 +50,7 @@ def under(path: Path, root: Path) -> Path:
     return resolved
 
 
-def read_plan(filename: Path, signature: Path, private_key: Path | None = None) -> dict:
+def read_plan(filename: Path, signature: Path, private_key: Path | None = None, rollback_signature: Path | None = None) -> dict:
     plan = json.loads(filename.read_text(encoding="utf-8-sig"))
     if not PRODUCT.fullmatch(plan.get("productName", "")) or plan.get("manufacturer") != "perfboard":
         raise ValueError("Only the prepared PerfboardUpdateValidation-<32hex> test product is accepted")
@@ -62,15 +70,35 @@ def read_plan(filename: Path, signature: Path, private_key: Path | None = None) 
         plan[name] = under(source, root)
     plan["validationRoot"] = root
     plan["signature"] = under(signature, root)
-    expected_temporary_installer = root / "temp" / f'{plan["productName"]}-0.1.1-updater-123456' / f'{plan["productName"]}-0.1.1-installer.exe'
-    if len(str(expected_temporary_installer)) >= 260:
-        raise ValueError("The GUID fixture would exceed ShellExecute's 260-character path limit; prepare a shorter validationRoot")
+    plan.setdefault("initialVersion", "0.1.0")
+    plan.setdefault("updateVersion", plan.get("applicationVersion", "0.1.1"))
+    if version_key(plan["initialVersion"]) >= version_key(plan["updateVersion"]):
+        raise ValueError("The update fixture version must be newer than its initial version")
+    if plan.get("rollbackInstaller"):
+        plan.setdefault("rollbackVersion", plan["initialVersion"])
+        if not (version_key("0.1.1") <= version_key(plan["rollbackVersion"]) < version_key(plan["updateVersion"])):
+            raise ValueError("Rollback requires an explicitly signed stable version from 0.1.1 onward")
+        source = Path(plan["rollbackInstaller"])
+        if not source.is_absolute():
+            raise ValueError("rollbackInstaller must be absolute")
+        plan["rollbackInstaller"] = under(source, root)
+        plan["rollbackSignature"] = under(rollback_signature or Path(str(source) + ".sig"), root)
+        if plan["rollbackInstaller"] == plan["updateInstaller"]:
+            raise ValueError("Rollback and update installers must be different files")
+    elif plan.get("rollbackVersion") or rollback_signature:
+        raise ValueError("Rollback metadata requires rollbackInstaller")
+    for version in (plan["updateVersion"], plan.get("rollbackVersion")):
+        if version is None:
+            continue
+        expected_temporary_installer = root / "temp" / f'{plan["productName"]}-{version}-updater-123456' / f'{plan["productName"]}-{version}-installer.exe'
+        if len(str(expected_temporary_installer)) >= 260:
+            raise ValueError("The GUID fixture would exceed ShellExecute's 260-character path limit; prepare a shorter validationRoot")
     if private_key is not None:
         # Production keys must never be handed to this acceptance script.
         plan["privateKey"] = under(private_key, root)
     if plan["initialInstaller"] == plan["updateInstaller"]:
         raise ValueError("Initial and update installers must be different files")
-    for name in ("initialInstaller", "updateInstaller"):
+    for name in ("initialInstaller", "updateInstaller", *(('rollbackInstaller',) if plan.get('rollbackInstaller') else ())):
         with plan[name].open("rb") as file:
             if file.read(2) != b"MZ":
                 raise ValueError(f"Not a Windows installer: {name}")
@@ -100,9 +128,11 @@ def wait_until(predicate, seconds=40, description="condition"):
 
 
 class FixtureServer:
-    def __init__(self, installer: Path, signature: str):
-        self.installer = installer
-        self.signature = signature
+    def __init__(self, plan, signature: str, rollback_signature: str | None = None):
+        self.latest_version = plan["updateVersion"]
+        self.releases = {self.latest_version: {"installer": plan["updateInstaller"], "signature": signature, "schema": plan.get("repositorySchemaVersion", 6)}}
+        if plan.get("rollbackInstaller"):
+            self.releases[plan["rollbackVersion"]] = {"installer": plan["rollbackInstaller"], "signature": rollback_signature, "schema": None if plan["rollbackVersion"] == "0.1.1" else plan.get("rollbackRepositorySchemaVersion", 6)}
         self.tamper = False
         self.checks = 0
         owner = self
@@ -112,12 +142,31 @@ class FixtureServer:
                 pass
 
             def do_GET(self):
-                if self.path.split("?")[0] == "/latest.json":
+                route = urllib.parse.unquote(self.path.split("?")[0])
+                if route == "/latest.json":
                     owner.checks += 1
-                    body = json.dumps({"version": "0.1.1", "notes": "Isolated native updater acceptance fixture", "pub_date": "2026-10-29T00:00:00Z", "platforms": {"windows-x86_64": {"url": owner.url + "/setup.exe", "signature": owner.signature}}}).encode()
+                    body = json.dumps(owner.manifest(owner.latest_version)).encode()
                     content_type = "application/json"
-                elif self.path.split("?")[0] == "/setup.exe":
-                    body = owner.installer.read_bytes()
+                elif route == "/releases":
+                    body = json.dumps(owner.catalog()).encode()
+                    content_type = "application/json"
+                elif route.startswith("/releases/tags/"):
+                    tag = route.rsplit("/", 1)[-1]
+                    release = next((release for release in owner.catalog() if release["tag_name"] == tag), None)
+                    if release is None:
+                        self.send_error(404)
+                        return
+                    body = json.dumps(release).encode()
+                    content_type = "application/json"
+                elif route.endswith("/latest.json") and route.split("/")[1].removeprefix("v") in owner.releases:
+                    body = json.dumps(owner.manifest(route.split("/")[1].removeprefix("v"))).encode()
+                    content_type = "application/json"
+                elif route.endswith(".exe.sig") and route.split("/")[1].removeprefix("v") in owner.releases:
+                    body = owner.releases[route.split("/")[1].removeprefix("v")]["signature"].encode()
+                    content_type = "text/plain"
+                elif route == "/setup.exe" or (route.endswith(".exe") and route.split("/")[1].removeprefix("v") in owner.releases):
+                    version = owner.latest_version if route == "/setup.exe" else route.split("/")[1].removeprefix("v")
+                    body = owner.releases[version]["installer"].read_bytes()
                     if owner.tamper:
                         body += b"\nINTENTIONALLY_TAMPERED_TEST_PACKAGE\n"
                     content_type = "application/octet-stream"
@@ -134,6 +183,23 @@ class FixtureServer:
         self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.url = f"http://127.0.0.1:{self.httpd.server_port}"
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
+
+    def manifest(self, version):
+        release = self.releases[version]
+        filename = f"Perfboard_{version}_x64-setup.exe"
+        manifest = {"version": version, "notes": "Isolated native updater acceptance fixture", "pub_date": "2026-10-29T00:00:00Z", "platforms": {"windows-x86_64": {"url": f"{self.url}/v{version}/{filename}", "signature": release["signature"]}}}
+        if release["schema"] is not None:
+            manifest["repositorySchemaVersion"] = release["schema"]
+        return manifest
+
+    def catalog(self):
+        releases = []
+        for index, version in enumerate(sorted(self.releases, key=version_key, reverse=True), start=1):
+            filename = f"Perfboard_{version}_x64-setup.exe"
+            base = f"{self.url}/v{version}"
+            releases.append({"id": index, "tag_name": "v" + version, "name": "Perfboard " + version, "body": "Isolated native release " + version, "draft": False, "prerelease": False, "published_at": "2026-10-29T00:00:00Z", "html_url": f"{self.url}/releases/tag/v{version}", "assets": [{"name": name, "browser_download_url": base + "/" + name, "state": "uploaded"} for name in (filename, filename + ".sig", "latest.json")]})
+        releases.append({"id": 1000, "tag_name": "v0.1.0", "name": "Unsigned legacy fixture", "body": "No signed update manifest", "draft": False, "prerelease": False, "published_at": "2026-10-27T00:00:00Z", "html_url": f"{self.url}/releases/tag/v0.1.0", "assets": [{"name": "Perfboard_0.1.0_x64-setup.exe", "browser_download_url": self.url + "/unsigned-not-executable.exe", "state": "uploaded"}]})
+        return releases
 
     def __enter__(self):
         self.thread.start()
@@ -183,8 +249,8 @@ def registry_values(product: str):
     return result
 
 
-def stop_test_processes(program: Path):
-    """Hold a process handle, verify its complete image path, then stop only that fixture."""
+def stop_test_processes(program: Path, terminate=True):
+    """Hold handles and verify complete image paths; optionally stop only that fixture."""
     import ctypes
     from ctypes import wintypes
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -201,6 +267,7 @@ def stop_test_processes(program: Path):
     snapshot = kernel.CreateToolhelp32Snapshot(2, 0)
     if snapshot in (None, ctypes.c_void_p(-1).value):
         raise RuntimeError("Could not enumerate fixture processes for cleanup")
+    matches = []
     try:
         entry = ProcessEntry()
         entry.dwSize = ctypes.sizeof(entry)
@@ -213,13 +280,49 @@ def stop_test_processes(program: Path):
                         size = wintypes.DWORD(32768)
                         filename = ctypes.create_unicode_buffer(size.value)
                         if kernel.QueryFullProcessImageNameW(handle, 0, filename, ctypes.byref(size)) and Path(filename.value).resolve() == program.resolve():
-                            if not kernel.TerminateProcess(handle, 0):
+                            matches.append(entry.th32ProcessID)
+                            if terminate and not kernel.TerminateProcess(handle, 0):
                                 raise RuntimeError("Could not stop an isolated fixture process")
                     finally:
                         kernel.CloseHandle(handle)
             present = kernel.Process32NextW(snapshot, ctypes.byref(entry))
     finally:
         kernel.CloseHandle(snapshot)
+    return matches
+
+
+def install_and_restart(client, program, product, port, target_version, allow_rollback=False):
+    """Run the actual native install command, then require a different restarted process."""
+    previous_pids = set(stop_test_processes(program, terminate=False))
+    if not previous_pids:
+        raise RuntimeError("The fixture application is not running before installation")
+    arguments = json.dumps({"allowRollback": allow_rollback})
+    client.evaluate("delete window.__updaterTestInstallResult;delete window.__updaterTestInstallError;void window.__TAURI_INTERNALS__.invoke('update_install'," + arguments + ").then(status=>window.__updaterTestInstallResult=status).catch(error=>window.__updaterTestInstallError=String(error))")
+    deadline = time.monotonic() + 60
+    while previous_pids.intersection(stop_test_processes(program, terminate=False)) and time.monotonic() < deadline:
+        try:
+            result = client.evaluate("({status:window.__updaterTestInstallResult,error:window.__updaterTestInstallError})")
+        except Exception:
+            result = {}
+        if result.get("error") or (result.get("status") or {}).get("error"):
+            raise RuntimeError("Native install was canceled before exit: " + str(result))
+        time.sleep(0.2)
+    if previous_pids.intersection(stop_test_processes(program, terminate=False)):
+        raise RuntimeError("The fixture application did not exit for installation")
+    client.close()
+    wait_until(lambda: registry_values(product).get("DisplayVersion") == target_version, seconds=180, description="NSIS update/rollback registration")
+    restarted = wait_until(lambda: connect_page(port), seconds=90, description="automatic restart after NSIS update/rollback")
+    restarted.wait("Boolean(document.querySelector('.app-shell'))", 40)
+    restarted.wait("window.__TAURI_INTERNALS__.invoke('update_status').then(s=>s.currentVersion===" + json.dumps(target_version) + " && s.phase==='idle')", 45)
+    return restarted
+
+
+def rejected(client, command, arguments):
+    try:
+        result = invoke(client, command, arguments)
+    except RuntimeError:
+        return True
+    return bool(result and result.get("error"))
 
 
 def cleanup_product(plan, environment):
@@ -282,11 +385,14 @@ def run(plan, port):
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", port))
     if "privateKey" in plan:
-        completed = subprocess.run(["node", str(WORKSPACE / "node_modules/@tauri-apps/cli/tauri.js"), "signer", "sign", "--private-key-path", str(plan["privateKey"]), "--app-version", "0.1.1", str(plan["updateInstaller"])], cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
+        completed = subprocess.run(["node", str(WORKSPACE / "node_modules/@tauri-apps/cli/tauri.js"), "signer", "sign", "--private-key-path", str(plan["privateKey"]), "--app-version", plan["updateVersion"], str(plan["updateInstaller"])], cwd=WORKSPACE, capture_output=True, text=True, timeout=60)
         if completed.returncode:
             raise RuntimeError("Fixture signing failed; inspect the local CLI environment without printing key material")
     signature = plan["signature"].read_text(encoding="utf-8").strip()
     base64.b64decode(signature, validate=True)
+    rollback_signature = plan["rollbackSignature"].read_text(encoding="utf-8").strip() if plan.get("rollbackInstaller") else None
+    if rollback_signature:
+        base64.b64decode(rollback_signature, validate=True)
     marker.write_text(json.dumps({"productName": plan["productName"], "validationRoot": str(root), "purpose": "synthetic updater installation acceptance only"}, indent=2), encoding="utf-8")
     results = []
     report = root / "native-updater-results.json"
@@ -297,6 +403,7 @@ def run(plan, port):
             raise AssertionError(name)
     main = child = process = None
     program = plan["programDirectory"] / "perfboard.exe"
+    initial_version, update_version = plan["initialVersion"], plan["updateVersion"]
     config, repository = plan["applicationConfigDirectory"], plan["repositoryDirectory"]
     environment = os.environ.copy()
     for name, directory in (("APPDATA", root / "appdata"), ("LOCALAPPDATA", root / "localappdata"), ("TEMP", root / "temp"), ("TMP", root / "temp"), ("WEBVIEW2_USER_DATA_FOLDER", root / "webview")):
@@ -305,8 +412,9 @@ def run(plan, port):
     environment["PERFBOARD_TEST_CONFIG_DIR"] = str(config)
     environment["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = f"--remote-debugging-port={port} --remote-allow-origins=*"
     try:
-        with FixtureServer(plan["updateInstaller"], signature) as server:
+        with FixtureServer(plan, signature, rollback_signature) as server:
             environment["PERFBOARD_TEST_UPDATE_ENDPOINT"] = server.url + "/latest.json"
+            environment["PERFBOARD_TEST_RELEASES_ENDPOINT"] = server.url + "/releases"
             # /D is an NSIS-specific final unquoted argument, including any spaces.
             command = f'"{plan["initialInstaller"]}" /S /NS /REPOSITORY="{repository}" /D={plan["programDirectory"]}'
             installed = subprocess.run(command, cwd=root, env=environment, timeout=180, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -316,7 +424,7 @@ def run(plan, port):
             main = wait_until(lambda: connect_page(port), description="initial hidden main WebView")
             main.wait("Boolean(window.__TAURI_INTERNALS__ && document.querySelector('.app-shell'))", 40)
             status = invoke(main, "update_status")
-            check("native updater recognizes the registered old installation", status["currentVersion"] == "0.1.0" and status["installation"] == "installed", status)
+            check("native updater recognizes the registered old installation", status["currentVersion"] == initial_version and status["installation"] == "installed", status)
             if plan.get("previousApplicationSha256"):
                 check("installed old executable matches the prepared test binary", fingerprint(program).lower() == plan["previousApplicationSha256"].lower())
             check("first installation created the synthetic repository", invoke(main, "repo_status")["ready"])
@@ -334,10 +442,10 @@ def run(plan, port):
             registry_before = registry_values(plan["productName"])
             old_hash = fingerprint(program)
             status = invoke(main, "update_check")
-            check("manual native check sees the signed next release", status["available"]["version"] == "0.1.1")
+            check("manual native check sees the signed next release", status["available"]["version"] == update_version)
             main.evaluate("[...document.querySelectorAll('.sidebar button')].find(button=>button.textContent.includes('版本与说明')).click()")
             main.wait("Boolean(document.querySelector('[data-testid=update-check]') && document.querySelector('.nav-update-badge'))")
-            check("version page and sidebar show the available update", main.evaluate("document.querySelector('.nav-update-badge').getAttribute('aria-label').includes('0.1.1')"))
+            check("version page and sidebar show the available update", main.evaluate("document.querySelector('.nav-update-badge').getAttribute('aria-label').includes(" + json.dumps(update_version) + ")"))
             invoke(main, "update_set_auto_check", {"enabled": True})
             main.wait("window.__TAURI_INTERNALS__.invoke('update_status').then(s=>s.autoCheckEnabled && s.phase==='idle')")
             stored = json.loads((config / "updater-settings.json").read_text(encoding="utf-8"))
@@ -371,30 +479,15 @@ def run(plan, port):
             # replace its ACK with saved=false, and do not call the normal ACK.
             child.evaluate("""(()=>{const internals=window.__TAURI_INTERNALS__;window.__updaterTestCallbacks=[...internals.callbacks.entries()];window.__updaterTestRejected=false;for(const [id,original] of window.__updaterTestCallbacks){internals.callbacks.set(id,data=>{if(data?.event==='perfboard:close-request'&&data.payload?.action==='flush'){window.__updaterTestRejected=true;void internals.invoke('close_response',{action:'flush',requestId:data.payload.requestId,saved:false});return}return original(data)})}})()""")
             status = invoke(main, "update_install")
-            check("a rejected independent-window save cancels native installation", status["phase"] == "ready" and bool(status["error"]) and child.evaluate("window.__updaterTestRejected") and process.poll() is None and fingerprint(program) == old_hash and registry_values(plan["productName"])["DisplayVersion"] == "0.1.0", status)
+            check("a rejected independent-window save cancels native installation", status["phase"] == "ready" and bool(status["error"]) and child.evaluate("window.__updaterTestRejected") and process.poll() is None and fingerprint(program) == old_hash and registry_values(plan["productName"])["DisplayVersion"] == initial_version, status)
             child.evaluate("for(const [id,original] of window.__updaterTestCallbacks){if(window.__TAURI_INTERNALS__.callbacks.has(id))window.__TAURI_INTERNALS__.callbacks.set(id,original)}")
             main.wait("!document.getElementById('root').inert")
             main.screenshot(root / "before-upgrade.png")
-            main.evaluate("void window.__TAURI_INTERNALS__.invoke('update_install').then(status=>window.__updaterTestInstallResult=status).catch(error=>window.__updaterTestInstallError=String(error))")
-            deadline = time.monotonic() + 60
-            while process.poll() is None and time.monotonic() < deadline:
-                try:
-                    result = main.evaluate("({status:window.__updaterTestInstallResult,error:window.__updaterTestInstallError})")
-                except Exception:
-                    result = {}
-                if result.get("error") or result.get("status", {}).get("error"):
-                    raise RuntimeError("Native install was canceled before exit: " + str(result))
-                time.sleep(0.2)
-            process.wait(timeout=5)
-            main.close()
+            main = install_and_restart(main, program, plan["productName"], port, update_version)
             child.close()
-            main = child = None
-            wait_until(lambda: registry_values(plan["productName"]).get("DisplayVersion") == "0.1.1", seconds=180, description="NSIS update registration")
-            main = wait_until(lambda: connect_page(port), seconds=90, description="automatic restart after NSIS update")
-            main.wait("Boolean(document.querySelector('.app-shell'))", 40)
-            main.wait("window.__TAURI_INTERNALS__.invoke('update_status').then(s=>s.currentVersion==='0.1.1' && s.phase==='idle')", 45)
+            child = None
             after_status = invoke(main, "update_status")
-            check("installed updater exits, upgrades and automatically restarts at 0.1.1", after_status["currentVersion"] == "0.1.1" and after_status["installation"] == "installed" and fingerprint(program) != old_hash, after_status)
+            check("installed updater exits, upgrades and automatically restarts at " + update_version, after_status["currentVersion"] == update_version and after_status["installation"] == "installed" and fingerprint(program) != old_hash, after_status)
             if plan.get("applicationSha256"):
                 check("upgraded executable matches the prepared new test binary", fingerprint(program).lower() == plan["applicationSha256"].lower())
             check("current-version manifest clears the update badge", after_status["available"] is None and main.evaluate("!document.querySelector('.nav-update-badge')"))
@@ -404,6 +497,33 @@ def run(plan, port):
             main.evaluate("[...document.querySelectorAll('.sidebar button')].find(button=>button.textContent.includes('版本与说明')).click()")
             main.wait("Boolean(document.querySelector('[data-testid=update-check]'))")
             main.screenshot(root / "after-upgrade.png")
+            if plan.get("rollbackInstaller"):
+                rollback_version = plan["rollbackVersion"]
+                versions = invoke(main, "update_list_versions")
+                check("historical catalog offers the signed rollback version", any(item["version"] == rollback_version and item["installable"] for item in versions), versions)
+                check("unsigned legacy release remains non-executable", any(item["version"] == "0.1.0" and not item["installable"] for item in versions) and rejected(main, "update_download_version", {"tag": "v0.1.0"}))
+                schema = server.releases[rollback_version]["schema"]
+                server.releases[rollback_version]["schema"] = 5
+                blocked = rejected(main, "update_download_version", {"tag": "v" + rollback_version})
+                if not blocked:
+                    blocked = rejected(main, "update_install", {"allowRollback": True})
+                check("incompatible historical database schema prevents installation", blocked and invoke(main, "update_status")["currentVersion"] == update_version and core_snapshot(repository) == before)
+                server.releases[rollback_version]["schema"] = schema
+                status = invoke(main, "update_download_version", {"tag": "v" + rollback_version})
+                check("selected old release downloads and verifies without becoming a latest-version badge", status["phase"] == "ready" and (status.get("target") or {}).get("version") == rollback_version and status["available"] is None, status)
+                check("native rollback requires explicit user confirmation", rejected(main, "update_install", {"allowRollback": False}) and registry_values(plan["productName"])["DisplayVersion"] == update_version)
+                main.screenshot(root / "before-rollback.png")
+                main = install_and_restart(main, program, plan["productName"], port, rollback_version, allow_rollback=True)
+                rolled_back = invoke(main, "update_status")
+                check("explicit rollback installs and automatically restarts at " + rollback_version, rolled_back["currentVersion"] == rollback_version and rolled_back["installation"] == "installed", rolled_back)
+                if rollback_version == initial_version:
+                    check("rollback executable matches the prepared original binary", fingerprint(program) == old_hash)
+                check("old version still reads its original updater preference schema", rolled_back["autoCheckEnabled"] is True and rolled_back["error"] is None)
+                check("rollback preserves synthetic records attachments and repository pointers", core_snapshot(repository) == before and pointer.read_bytes() == pointer_bytes and registry_values(plan["productName"]).get("RepositoryPath") == registry_before.get("RepositoryPath"))
+                check("automatic check after rollback only offers the newer version", rolled_back["available"] is not None and rolled_back["available"]["version"] == update_version)
+                main.evaluate("[...document.querySelectorAll('.sidebar button')].find(button=>button.textContent.includes('版本与说明')).click()")
+                main.wait("Boolean(document.querySelector('[data-testid=update-check]'))")
+                main.screenshot(root / "after-rollback.png")
     except Exception as error:
         if main:
             try:
@@ -438,12 +558,13 @@ def main():
     parser.add_argument("--plan", required=True, type=Path)
     parser.add_argument("--signature", required=True, type=Path)
     parser.add_argument("--private-key", type=Path, help="Optional fixture key inside validationRoot, passed to Tauri CLI by path only")
+    parser.add_argument("--rollback-signature", type=Path, help="Signature for the optional explicit rollback installer inside validationRoot")
     parser.add_argument("--port", type=int, default=9345)
     parser.add_argument("--inspect-plan", action="store_true", help="Validate path constraints without launching any executable")
     args = parser.parse_args()
     if not 1024 <= args.port <= 65535:
         parser.error("--port must be an unprivileged TCP port")
-    plan = read_plan(args.plan, args.signature, args.private_key)
+    plan = read_plan(args.plan, args.signature, args.private_key, args.rollback_signature)
     if args.inspect_plan:
         print(json.dumps({"accepted": True, "productName": plan["productName"], "validationRoot": str(plan["validationRoot"]), "constraints": "GUID test product, paths contained in validationRoot, no symlinks/junctions, local HTTP only; no installers executed"}, ensure_ascii=False))
     else:

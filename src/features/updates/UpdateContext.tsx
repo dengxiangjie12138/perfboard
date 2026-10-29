@@ -8,12 +8,17 @@ export interface UpdateContextValue extends UpdateSnapshot {
   check: () => Promise<void>;
   setAutoCheck: (enabled: boolean) => Promise<void>;
   download: () => Promise<void>;
-  install: () => Promise<void>;
-  openInstaller: () => Promise<void>;
+  install: (allowRollback?: boolean) => Promise<void>;
+  openInstaller: (allowRollback?: boolean) => Promise<void>;
+  listVersions: () => Promise<void>;
+  downloadVersion: (tag: string) => Promise<void>;
+  openRelease: (tag: string) => Promise<void>;
 }
 const noop = async () => {};
 const Context = createContext<UpdateContextValue>({status: initialUpdateStatus(), supported: false,
-  loading: false, pendingAction: null, check: noop, setAutoCheck: noop, download: noop, install: noop, openInstaller: noop});
+  loading: false, pendingAction: null, versions: null, versionsLoading: false, versionsError: null,
+  check: noop, setAutoCheck: noop, download: noop, install: noop, openInstaller: noop,
+  listVersions: noop, downloadVersion: noop, openRelease: noop});
 
 export function UpdateProvider({children}: {children: ReactNode}) {
   const [client] = useState(() => new UpdateClient({status: updateApi.status,
@@ -25,8 +30,11 @@ export function UpdateProvider({children}: {children: ReactNode}) {
     check: () => client.perform('check', updateApi.check),
     setAutoCheck: (enabled: boolean) => client.perform('set-auto', () => updateApi.setAutoCheck(enabled)),
     download: () => client.perform('download', updateApi.download),
-    install: () => client.perform('install', updateApi.install),
-    openInstaller: () => client.perform('open', updateApi.openInstaller),
+    install: (allowRollback = false) => client.perform('install', () => updateApi.install(allowRollback)),
+    openInstaller: (allowRollback = false) => client.perform('open', () => updateApi.openInstaller(allowRollback)),
+    listVersions: () => client.listVersions(updateApi.listVersions),
+    downloadVersion: (tag: string) => client.perform('download', () => updateApi.downloadVersion(tag)),
+    openRelease: (tag: string) => client.perform('manual', () => updateApi.openRelease(tag)),
   }), [client]);
   return <Context.Provider value={{...snapshot, ...actions}}>{children}</Context.Provider>;
 }

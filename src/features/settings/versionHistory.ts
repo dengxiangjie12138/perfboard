@@ -5,6 +5,16 @@ export interface VersionHistoryEntry {version: string; dateRange: string; groups
 // Historical facts: CHANGELOG.md / README.md at dbefa503, and the corresponding
 // Git records from the initial 2026-10-01 app through dbefa503 on 2026-10-03.
 export const versionHistory: readonly VersionHistoryEntry[] = [{
+  version: '0.1.2',
+  dateRange: '2026-10-29',
+  groups: [
+    {label: '新增', items: [
+      '更新页可手动载入正式版本列表，查看指定版本说明并选择下载；列表区分当前、最新和可回退版本。',
+      '支持用户确认后回退到兼容的已签名版本，安装前保存所有窗口并校验当前数据库格式；自动检查始终只提示最新版本。',
+    ]},
+    {label: '调整', items: ['缺少更新签名的历史版本提供发布页下载入口，不通过应用内更新器安装。']},
+  ],
+}, {
   version: '0.1.1',
   dateRange: '2026-10-29',
   groups: [

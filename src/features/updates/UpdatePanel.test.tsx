@@ -1,11 +1,15 @@
 import {expect, it, vi} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {UpdatePanel, updateStatusLabel} from './UpdatePanel';
+import {InstallVersionDialog, UpdatePanel, confirmVersionInstall, updateStatusLabel} from './UpdatePanel';
 import {initialUpdateStatus, type UpdateStatus} from './updateApi';
 import type {UpdateContextValue} from './UpdateContext';
+import {installConfirmation} from './releaseVersions';
+
+vi.mock('../../state/DataContext', () => ({useData: () => ({error: null})}));
 
 function model(status: Partial<UpdateStatus> = {}, view: Partial<UpdateContextValue> = {}): UpdateContextValue {
   return {status: {...initialUpdateStatus(), ...status}, supported: true, loading: false, pendingAction: null,
+    versions: null, versionsLoading: false, versionsError: null, listVersions: vi.fn(), downloadVersion: vi.fn(), openRelease: vi.fn(),
     check: vi.fn(), setAutoCheck: vi.fn(), download: vi.fn(), install: vi.fn(), openInstaller: vi.fn(), ...view};
 }
 const available = {version: '0.2.0', notes: '新增功能\n修复保存问题', pubDate: '2026-10-29T00:00:00Z'};
@@ -29,7 +33,7 @@ it('disables conflicting controls while checking or downloading and supports unk
   expect(checking).toContain('data-testid="update-check" disabled=""');
   expect(checking).toContain('data-testid="update-auto-check" disabled=""');
   const unknown = render(model({available, phase: 'downloading', downloadedBytes: 1024}));
-  expect(unknown).toContain('aria-label="新版本下载进度" max="100"');
+  expect(unknown).toContain('aria-label="版本下载进度" max="100"');
   expect(unknown).not.toContain('value="'); expect(unknown).toContain('1 KiB');
   const known = render(model({available, phase: 'downloading', downloadedBytes: 512, totalBytes: 1024}));
   expect(known).toContain('value="50"'); expect(known).toContain('50%');
@@ -56,4 +60,37 @@ it('does not call a failed check latest or enable native actions in browser prev
   const html = render(model({}, {supported: false}));
   expect(html).toContain('data-testid="update-check" disabled=""');
   expect(html).toContain('请在 Perfboard Windows 应用中检查和安装更新');
+});
+it('shows a downloaded rollback target even when no newer version is available', () => {
+  const value = model({currentVersion: '0.1.2', available: null,
+    target: {version: '0.1.1', notes: '上一版说明', pubDate: null}, phase: 'ready', installation: 'installed'});
+  const html = render(value);
+  expect(html).toContain('回退目标'); expect(html).toContain('0.1.2 → 0.1.1');
+  expect(html).toContain('保存并重启回退'); expect(html).not.toContain('新版本 0.1.1');
+  expect(value.install).not.toHaveBeenCalled();
+});
+it('explains the exact rollback and compatibility before allowing explicit installation', async () => {
+  const value = model({currentVersion: '0.1.2', available,
+    target: {version: '0.1.1', notes: null, pubDate: null}, phase: 'ready', installation: 'installed'});
+  const confirmation = installConfirmation(value.status)!;
+  const html = renderToStaticMarkup(<InstallVersionDialog confirmation={confirmation} busy={false} onClose={() => {}} onConfirm={() => {}}/>);
+  expect(html).toContain('确认回退版本'); expect(html).toContain('0.1.2 → 0.1.1');
+  expect(html).toContain('数据库和附件会继续保留'); expect(html).toContain('兼容的当前数据格式');
+  expect(value.install).not.toHaveBeenCalled();
+  await confirmVersionInstall(value, confirmation);
+  expect(value.install).toHaveBeenCalledWith(true);
+  expect(value.openInstaller).not.toHaveBeenCalled();
+});
+it('requires the downloaded target to still match the confirmed version and never opts upgrades into rollback', async () => {
+  const value = model({currentVersion: '0.1.2', available,
+    target: {version: '0.1.1', notes: null, pubDate: null}, phase: 'ready', installation: 'installed'});
+  const old = installConfirmation(value.status)!;
+  value.status = {...value.status, target: {version: '0.1.0', notes: null, pubDate: null}};
+  await confirmVersionInstall(value, old); expect(value.install).not.toHaveBeenCalled();
+  value.status = {...value.status, target: available};
+  await confirmVersionInstall(value, installConfirmation(value.status)!);
+  expect(value.install).toHaveBeenCalledWith(false);
+  const stale = renderToStaticMarkup(<InstallVersionDialog confirmation={old} busy={false} valid={false} onClose={() => {}} onConfirm={() => {}}/>);
+  expect(stale).toContain('data-testid="update-confirm-install" disabled=""');
+  expect(stale).not.toContain('<button disabled="">暂不安装');
 });

@@ -1,0 +1,7 @@
+.release-version-picker{margin-top:22px;padding-top:20px;border-top:1px solid var(--border)}
+.release-version-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.release-version-heading h3{display:flex;align-items:center;gap:8px;font-size:14px;margin:0}
+.release-version-select{margin:18px 0 0;max-width:440px}
+.release-version-selection{margin-top:18px;font-size:13px}
+.release-version-selection .update-notes{margin-bottom:12px}
+.update-confirm-target{font-size:16px;overflow-wrap:anywhere}

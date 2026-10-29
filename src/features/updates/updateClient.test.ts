@@ -83,4 +83,31 @@ describe('native update state subscription', () => {
     expect(state.client.getSnapshot().status.available).toBeNull();
     expect(state.client.getSnapshot().pendingAction).toBeNull();
   });
+  it('loads the formal version catalog only on demand without changing the latest update or download target', async () => {
+    const state = setup(available); await state.client.start();
+    expect(state.client.getSnapshot().versions).toBeNull();
+    await state.client.listVersions(async () => [
+      {tag: 'v0.1.0', version: '0.1.0', notes: null, pubDate: null, installable: false},
+      {tag: 'v0.1.1', version: '0.1.1', notes: null, pubDate: null, installable: true},
+    ]);
+    expect(state.client.getSnapshot().versions?.map(version => version.version)).toEqual(['0.1.1', '0.1.0']);
+    expect(state.client.getSnapshot().status.available).toEqual(available.available);
+    expect(state.client.getSnapshot().status.target).toBeNull();
+    await state.client.listVersions(async () => {throw new Error('catalog unavailable')});
+    expect(state.client.getSnapshot().versions).toHaveLength(2);
+    expect(state.client.getSnapshot().versionsError).toBe('catalog unavailable');
+    expect(state.client.getSnapshot().status.error).toBeNull();
+    expect(state.client.getSnapshot().status.available).toEqual(available.available);
+  });
+  it('keeps a rollback target independent of a newer-version event and ignores a stopped catalog request', async () => {
+    const state = setup(available); await state.client.start();
+    const target = {version: '0.1.1', notes: null, pubDate: null};
+    state.emit({...available, target, phase: 'ready'});
+    expect(state.client.getSnapshot().status.available?.version).toBe('0.2.0');
+    expect(state.client.getSnapshot().status.target?.version).toBe('0.1.1');
+    const pending = deferred<[]>(); const task = state.client.listVersions(() => pending.promise);
+    state.client.stop(); pending.resolve([]); await task;
+    expect(state.client.getSnapshot().versions).toBeNull();
+    expect(state.client.getSnapshot().versionsLoading).toBe(false);
+  });
 });

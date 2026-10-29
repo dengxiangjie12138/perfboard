@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { prepareRelease, writeRelease } from '../prepare-update-release.mjs';
 
-async function fixture(t) {
+async function fixture(t, releaseVersion = '0.1.1') {
   const base = await mkdtemp(path.join(os.tmpdir(), 'perfboard-release-test-'));
   t.after(async () => {
     const resolved = path.resolve(base);
@@ -19,17 +19,19 @@ async function fixture(t) {
   const rawPublic = publicKey.export({ type: 'spki', format: 'der' }).subarray(-32);
   const publicBox = `untrusted comment: test public key\n${Buffer.concat([Buffer.from('Ed'), keyId, rawPublic]).toString('base64')}\n`;
   const updaterKey = Buffer.from(publicBox).toString('base64');
-  const installer = path.join(base, 'Perfboard_0.1.1_x64-setup.exe');
+  const installer = path.join(base, `Perfboard_${releaseVersion}_x64-setup.exe`);
   const bytes = Buffer.concat([Buffer.from('MZ'), Buffer.alloc(126), randomBytes(200)]);
   const notesFile = path.join(base, 'notes.md');
-  const config = { version: '0.1.1', bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: updaterKey, requireSignedVersion: true } } };
+  const config = { version: releaseVersion, bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: updaterKey, requireSignedVersion: true } } };
   await mkdir(path.join(base, 'src-tauri'));
-  await writeFile(path.join(base, 'package.json'), JSON.stringify({ version: '0.1.1' }));
+  await mkdir(path.join(base, 'src-tauri', 'src'));
+  await writeFile(path.join(base, 'src-tauri', 'src', 'repository.rs'), 'const SCHEMA_VERSION: i64 = 6;\n');
+  await writeFile(path.join(base, 'package.json'), JSON.stringify({ version: releaseVersion }));
   await writeFile(path.join(base, 'src-tauri', 'tauri.conf.json'), JSON.stringify(config));
-  await writeFile(path.join(base, 'src-tauri', 'Cargo.toml'), '[package]\nname = "perfboard"\nversion = "0.1.1"\n\n[dependencies]\nexample = "2"\n');
+  await writeFile(path.join(base, 'src-tauri', 'Cargo.toml'), `[package]\nname = "perfboard"\nversion = "${releaseVersion}"\n\n[dependencies]\nexample = "2"\n`);
   await writeFile(installer, bytes);
   await writeFile(notesFile, '增加软件更新。\n');
-  function signature({ version = '0.1.1', filename = path.basename(installer), body = bytes, key = privateKey, comment } = {}) {
+  function signature({ version = releaseVersion, filename = path.basename(installer), body = bytes, key = privateKey, comment } = {}) {
     const payload = sign(null, createHash('blake2b512').update(body).digest(), key);
     const trusted = comment ?? `timestamp:1234567890\tfile:${filename}${version === null ? '' : `\tversion:${version}`}`;
     const global = sign(null, Buffer.concat([payload, Buffer.from(trusted)]), key);
@@ -46,6 +48,7 @@ test('generates correct immutable GitHub installer URL and embedded signature af
   assert.equal(release.manifest.version, '0.1.1');
   assert.equal(release.manifest.pub_date, '2026-10-29T04:00:00.000Z');
   assert.equal(release.manifest.notes, '增加软件更新。');
+  assert.equal(release.manifest.repositorySchemaVersion, 6);
   assert.equal(release.manifest.platforms['windows-x86_64'].url, 'https://github.com/dengxiangjie12138/perfboard/releases/download/v0.1.1/Perfboard_0.1.1_x64-setup.exe');
   assert.equal(release.manifest.platforms['windows-x86_64'].signature, (await readFile(`${f.installer}.sig`, 'utf8')).trim());
   const output = path.join(f.base, 'assets');
@@ -55,6 +58,28 @@ test('generates correct immutable GitHub installer URL and embedded signature af
   assert.ok(sums.includes(`${release.sha256}  ${release.filename}`));
   // An identical invocation is safe and does not replace published files.
   await writeRelease(release, output);
+});
+
+test('prepares later releases from project metadata without hardcoded 0.1.1 filenames or URLs', async t => {
+  const f = await fixture(t, '0.1.2');
+  const release = await prepareRelease(f.options);
+  assert.equal(release.manifest.version, '0.1.2');
+  assert.equal(release.filename, 'Perfboard_0.1.2_x64-setup.exe');
+  assert.equal(release.manifest.repositorySchemaVersion, 6);
+  assert.equal(release.manifest.platforms['windows-x86_64'].url, 'https://github.com/dengxiangjie12138/perfboard/releases/download/v0.1.2/Perfboard_0.1.2_x64-setup.exe');
+});
+
+test('reads repository compatibility metadata from the target release source', async t => {
+  const f = await fixture(t, '0.1.2');
+  await writeFile(path.join(f.base, 'src-tauri', 'src', 'repository.rs'), 'pub(crate) const SCHEMA_VERSION: i64 = 7;\n');
+  const release = await prepareRelease(f.options);
+  assert.equal(release.manifest.repositorySchemaVersion, 7);
+});
+
+test('refuses release metadata when the repository schema version is not discoverable', async t => {
+  const f = await fixture(t, '0.1.2');
+  await writeFile(path.join(f.base, 'src-tauri', 'src', 'repository.rs'), '// schema declaration missing\n');
+  await assert.rejects(prepareRelease(f.options), /SCHEMA_VERSION/);
 });
 
 test('rejects mismatched package/Cargo/Tauri versions before generating assets', async t => {

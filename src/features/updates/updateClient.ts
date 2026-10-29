@@ -1,11 +1,15 @@
-import {initialUpdateStatus, type UpdateStatus} from './updateApi';
+import {initialUpdateStatus, type ReleaseVersion, type UpdateStatus} from './updateApi';
+import {orderedReleaseVersions} from './releaseVersions';
 
-export type UpdateAction = 'check' | 'set-auto' | 'download' | 'install' | 'open';
+export type UpdateAction = 'check' | 'set-auto' | 'download' | 'install' | 'open' | 'manual';
 export interface UpdateSnapshot {
   status: UpdateStatus;
   supported: boolean;
   loading: boolean;
   pendingAction: UpdateAction | null;
+  versions: ReleaseVersion[] | null;
+  versionsLoading: boolean;
+  versionsError: string | null;
 }
 export interface UpdateTransport {
   status: () => Promise<UpdateStatus>;
@@ -22,7 +26,8 @@ export class UpdateClient {
   private active = false;
   private unlisten: (() => void) | undefined;
   constructor(private readonly transport: UpdateTransport, supported: boolean) {
-    this.snapshot = {status: initialUpdateStatus(), supported, loading: supported, pendingAction: null};
+    this.snapshot = {status: initialUpdateStatus(), supported, loading: supported, pendingAction: null,
+      versions: null, versionsLoading: false, versionsError: null};
   }
   getSnapshot = (): UpdateSnapshot => this.snapshot;
   subscribe = (listener: () => void): (() => void) => {
@@ -66,7 +71,20 @@ export class UpdateClient {
     ++this.generation;
     this.unlisten?.();
     this.unlisten = undefined;
-    this.publish({pendingAction: null});
+    this.publish({pendingAction: null, versionsLoading: false});
+  }
+  async listVersions(operation: () => Promise<ReleaseVersion[]>): Promise<void> {
+    if (!this.active || !this.snapshot.supported || this.snapshot.versionsLoading) return;
+    const generation = this.generation;
+    this.publish({versionsLoading: true, versionsError: null});
+    try {
+      const versions = await operation();
+      if (this.active && this.generation === generation) this.publish({versions: orderedReleaseVersions(versions)});
+    } catch (error) {
+      if (this.active && this.generation === generation) this.publish({versionsError: failureText(error)});
+    } finally {
+      if (this.active && this.generation === generation) this.publish({versionsLoading: false});
+    }
   }
   async perform(action: UpdateAction, operation: () => Promise<UpdateStatus | void>): Promise<void> {
     if (!this.active || !this.snapshot.supported || this.snapshot.loading || this.snapshot.pendingAction) return;

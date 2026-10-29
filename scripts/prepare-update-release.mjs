@@ -80,18 +80,21 @@ async function fileHashes(file) {
 }
 
 export async function prepareRelease({ installer, notesFile, projectRoot = ROOT, date = new Date() }) {
-  const [packageJson, config, cargo, signature, notes] = await Promise.all([
+  const [packageJson, config, cargo, signature, notes, repositorySource] = await Promise.all([
     readFile(path.join(projectRoot, 'package.json'), 'utf8').then(JSON.parse),
     readFile(path.join(projectRoot, 'src-tauri', 'tauri.conf.json'), 'utf8').then(JSON.parse),
     readFile(path.join(projectRoot, 'src-tauri', 'Cargo.toml'), 'utf8'),
     readFile(`${installer}.sig`, 'utf8'),
     readFile(notesFile, 'utf8'),
+    readFile(path.join(projectRoot, 'src-tauri', 'src', 'repository.rs'), 'utf8'),
   ]);
   const packageSection = cargo.match(/^\[package\]\s*\r?\n([\s\S]*?)(?=^\[|$(?![\s\S]))/m)?.[1];
   const cargoVersion = packageSection?.match(/^version\s*=\s*"([^"]+)"\s*$/m)?.[1];
   const version = packageJson.version;
   if (!STABLE_VERSION.test(version ?? '')) throw new Error('Release version must be a stable SemVer without a v prefix');
   if (config.version !== version || cargoVersion !== version) throw new Error('package.json, Cargo.toml and tauri.conf.json versions differ');
+  const repositorySchemaVersion = Number(repositorySource.match(/^\s*(?:pub(?:\([^)]*\))?\s+)?const\s+SCHEMA_VERSION\s*:\s*\w+\s*=\s*(\d+)\s*;/m)?.[1]);
+  if (!Number.isSafeInteger(repositorySchemaVersion) || repositorySchemaVersion < 1) throw new Error('Cannot determine repository SCHEMA_VERSION for release compatibility metadata');
   if (!config.bundle?.createUpdaterArtifacts || !config.plugins?.updater?.requireSignedVersion) {
     throw new Error('Enable createUpdaterArtifacts and updater.requireSignedVersion before releasing');
   }
@@ -103,7 +106,7 @@ export async function prepareRelease({ installer, notesFile, projectRoot = ROOT,
   const hashes = await fileHashes(installer);
   verifySignature({ signature, publicKey: config.plugins.updater.pubkey, digest: hashes.digest, version, filename });
   const manifest = {
-    version, notes: notes.trim(), pub_date: published.toISOString(),
+    version, notes: notes.trim(), pub_date: published.toISOString(), repositorySchemaVersion,
     platforms: {
       'windows-x86_64': {
         signature: signature.trim(),
