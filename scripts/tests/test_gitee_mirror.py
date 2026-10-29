@@ -247,6 +247,81 @@ class MirrorTests(unittest.TestCase):
         invoke.assert_not_called()
         self.assertEqual(self.git("--git-dir", str(self.remote), "for-each-ref", "--format=%(refname)"), "")
 
+    def cleanup_environment(self):
+        return dict(self.environment, EVENT_NAME="workflow_dispatch", REQUESTED_TAG="mirror-upload-probe-123-1-" + "a" * 16,
+                    CLEANUP_RELEASE_ID="1254644")
+
+    def acknowledge_cleanup(self, tag, release_id, commit, filename, environment):
+        self.acknowledge_probe(tag, commit, filename, environment, verified=False)
+        result = json.loads(filename.read_text())
+        result["releaseId"] = release_id
+        filename.write_text(json.dumps(result))
+
+    def test_cleanup_only_recovers_owned_release_and_tag_without_starting_upload_or_creating_tags(self):
+        environment = self.cleanup_environment()
+        tag = environment["REQUESTED_TAG"]
+        self.git("push", "--quiet", str(self.remote), self.head + ":refs/tags/" + tag, cwd=self.source)
+        with self.isolated_probe(None) as (_unused, upload), patch.object(mirror, "invoke_upload_cleanup", side_effect=self.acknowledge_cleanup) as cleanup:
+            mirror.cleanup_upload(self.source, environment)
+        upload.assert_not_called()
+        cleanup.assert_called_once()
+        self.assertEqual(cleanup.call_args.args[:3], (tag, 1254644, self.head))
+        self.assertEqual(self.git("--git-dir", str(self.remote), "for-each-ref", "--format=%(refname)"), "")
+        self.assertIn("No installer was uploaded", (self.root / "summary.md").read_text())
+
+    def test_cleanup_only_accepts_an_already_absent_tag_without_recreating_it(self):
+        environment = self.cleanup_environment()
+        def cleanup(*args):
+            self.assertEqual(self.git("--git-dir", str(self.remote), "for-each-ref", "--format=%(refname)"), "")
+            self.acknowledge_cleanup(*args)
+        with self.isolated_probe(None) as (_unused, upload), patch.object(mirror, "invoke_upload_cleanup", side_effect=cleanup):
+            mirror.cleanup_upload(self.source, environment)
+        upload.assert_not_called()
+        self.assertEqual(self.git("--git-dir", str(self.remote), "for-each-ref", "--format=%(refname)"), "")
+
+    def test_cleanup_only_rejects_production_tags_invalid_ids_and_nonmanual_events_before_git(self):
+        environment = self.cleanup_environment()
+        for changed in [{"REQUESTED_TAG": "v0.1.2"}, {"REQUESTED_TAG": "mirror-upload-probe-123-1-invalid"},
+                        {"CLEANUP_RELEASE_ID": "0"}, {"CLEANUP_RELEASE_ID": "1254644; extra"},
+                        {"CLEANUP_RELEASE_ID": "9007199254740992"}, {"EVENT_NAME": "push"}, {"GITEE_TOKEN": ""}]:
+            with self.subTest(changed=changed), patch.object(mirror, "Git") as git, self.assertRaises(ValueError):
+                mirror.cleanup_upload(self.source, dict(environment, **changed))
+            git.assert_not_called()
+        for event in ("push", "release"):
+            with self.assertRaises(ValueError):
+                mirror.select_releases({"RUN_MODE": "cleanup_upload", "EVENT_NAME": event})
+        self.assertEqual(mirror.select_releases({"RUN_MODE": "cleanup_upload", "EVENT_NAME": "workflow_dispatch"}), [])
+
+    def test_cleanup_only_keeps_tag_without_an_ack_for_the_exact_known_release_id(self):
+        environment = self.cleanup_environment()
+        tag = environment["REQUESTED_TAG"]
+        self.git("push", "--quiet", str(self.remote), self.head + ":refs/tags/" + tag, cwd=self.source)
+        def wrong_id(tag, release_id, commit, filename, child):
+            self.acknowledge_cleanup(tag, release_id + 1, commit, filename, child)
+        for callback in [lambda *_args: None, wrong_id]:
+            with self.isolated_probe(None), patch.object(mirror, "invoke_upload_cleanup", side_effect=callback), self.assertRaises(ValueError):
+                mirror.cleanup_upload(self.source, environment)
+            self.assertEqual(self.git("--git-dir", str(self.remote), "rev-parse", "refs/tags/" + tag), self.head)
+
+    def test_cleanup_only_preserves_tag_changes_before_and_during_release_cleanup(self):
+        environment = self.cleanup_environment()
+        tag = environment["REQUESTED_TAG"]
+        self.git("push", "--quiet", str(self.remote), self.head + ":refs/tags/" + tag, cwd=self.source)
+        (self.source / "README.md").write_text("concurrent cleanup fixture\n")
+        self.git("add", ".", cwd=self.source)
+        self.git("commit", "--quiet", "-m", "changed cleanup fixture", cwd=self.source)
+        changed = self.git("rev-parse", "HEAD", cwd=self.source)
+        def change_tag(*args):
+            self.git("push", "--force", "--quiet", str(self.remote), changed + ":refs/tags/" + tag, cwd=self.source)
+            self.acknowledge_cleanup(*args)
+        with self.isolated_probe(None), patch.object(mirror, "invoke_upload_cleanup", side_effect=change_tag), self.assertRaisesRegex(ValueError, "changed during"):
+            mirror.cleanup_upload(self.source, environment)
+        self.assertEqual(self.git("--git-dir", str(self.remote), "rev-parse", "refs/tags/" + tag), changed)
+        with self.isolated_probe(None), patch.object(mirror, "invoke_upload_cleanup") as cleanup, self.assertRaisesRegex(ValueError, "commit changed"):
+            mirror.cleanup_upload(self.source, environment)
+        cleanup.assert_not_called()
+        self.assertEqual(self.git("--git-dir", str(self.remote), "rev-parse", "refs/tags/" + tag), changed)
+
 
 if __name__ == "__main__":
     unittest.main()

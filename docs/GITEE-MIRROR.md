@@ -53,6 +53,8 @@ node --test --test-isolation=none scripts/tests/mirror-gitee-release.node-test.m
 
 只有确认临时 Release 已移除后，任务才按原始提交校验并删除自己创建的临时标签。归属发生变化、接口结果无法确认或标签被其他操作更新时，任务停止并在摘要中保留临时标签名称供检查；不会扩大清理范围或删除正式版本。该诊断与同步任务共用同一个串行队列。
 
+中断后需要恢复清理时，手动选择 `mode=cleanup_upload`，`tag` 填完整临时探测标签，`release_id` 填已确认的临时 Release ID，不勾选 `seed_history`。此模式仅核对归属并清理该临时 Release 与标签，不创建标签、发布或上传安装包；正式版本标签不被接受。标签已经不存在时仍可确认临时 Release 已清理，结果不明时保留资源并报错。
+
 ## 代码、发布附件与更新索引
 
 代码同步只推送 `main` 和符合正式 SemVer 的标签。它不用 `--mirror` 或 `--all`，不会带上本地旧历史备份分支；不会强推 `main`、覆盖已存在的不同版本标签或删除 Gitee 其它分支。已有 Gitee 内容与 GitHub 历史不一致时，任务停止并提示人工处理，不会自动丢弃内容。

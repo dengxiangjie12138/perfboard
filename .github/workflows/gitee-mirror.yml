@@ -9,13 +9,18 @@ name: Mirror to Gitee
   workflow_dispatch:
     inputs:
       mode:
-        description: 'sync 同步；validate 隔离测试；dry_run 只读校验；verify_upload 单次隔离上传验证'
+        description: 'sync 同步；validate 测试；dry_run 只读；verify_upload 单次上传验证；cleanup_upload 仅清理探测'
         required: true
         default: sync
         type: choice
-        options: [sync, validate, dry_run, verify_upload]
+        options: [sync, validate, dry_run, verify_upload, cleanup_upload]
       tag:
-        description: '补同步正式版本，例如 v0.1.2；留空仅同步代码'
+        description: 'sync 填正式版本；cleanup_upload 填完整 mirror-upload-probe-... 标签'
+        required: false
+        default: ''
+        type: string
+      release_id:
+        description: '仅 cleanup_upload 填需清理的临时 Release ID；其他模式留空'
         required: false
         default: ''
         type: string
@@ -72,7 +77,7 @@ jobs:
         run: python3 scripts/run-gitee-mirror.py --select-releases
 
       - name: Prepare Node.js
-        if: steps.authorization.outputs.run == 'true' && (steps.releases.outputs.tags != '[]' || steps.authorization.outputs.mode == 'validate' || steps.authorization.outputs.mode == 'verify_upload')
+        if: steps.authorization.outputs.run == 'true' && (steps.releases.outputs.tags != '[]' || steps.authorization.outputs.mode == 'validate' || steps.authorization.outputs.mode == 'verify_upload' || steps.authorization.outputs.mode == 'cleanup_upload')
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
@@ -81,10 +86,12 @@ jobs:
       - name: Mirror or validate
         if: steps.authorization.outputs.run == 'true'
         env:
-          GITEE_TOKEN: ${{ (steps.authorization.outputs.mode == 'sync' || steps.authorization.outputs.mode == 'verify_upload') && secrets.GITEE_TOKEN || '' }}
+          GITEE_TOKEN: ${{ (steps.authorization.outputs.mode == 'sync' || steps.authorization.outputs.mode == 'verify_upload' || steps.authorization.outputs.mode == 'cleanup_upload') && secrets.GITEE_TOKEN || '' }}
           GITEE_USERNAME: deng-xiangjie
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAGS: ${{ steps.releases.outputs.tags }}
           RUN_MODE: ${{ steps.authorization.outputs.mode }}
           EVENT_NAME: ${{ github.event_name }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+          CLEANUP_RELEASE_ID: ${{ inputs.release_id }}
         run: python3 scripts/run-gitee-mirror.py

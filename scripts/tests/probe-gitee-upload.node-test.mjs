@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {probeUpload, releaseMarker, SOURCE_COMMIT, SOURCE_TAG} from '../probe-gitee-upload.mjs';
+import {probeUpload, cleanupProbe, releaseMarker, SOURCE_COMMIT, SOURCE_TAG} from '../probe-gitee-upload.mjs';
 import {SOURCE, TARGET} from '../mirror-gitee-release.mjs';
 
 const TAG = 'mirror-upload-probe-123456-1-0123456789abcdef';
@@ -162,4 +162,46 @@ test('the fixed public installer hash is enforced before any release or attachme
   assert.match(result.error, /differs from the fixed public release/);
   assert.equal(remote.calls.some(call => call.method !== 'GET'), false);
   assert.equal(result.releaseId, null);
+});
+
+test('cleanup-only removes the exact owned release with zero source fetches or uploads and preserves its known ID in the acknowledgement', async t => {
+  const {resultFile, remote} = await fixture(t);
+  remote.releases.set(TAG, {id: 900, tag_name: TAG, name: `Perfboard upload probe ${TAG}`,
+    body: releaseMarker(TAG, SOURCE_COMMIT), target_commitish: SOURCE_COMMIT, prerelease: true});
+  const result = await cleanupProbe({...remote.options(resultFile), releaseId: 900});
+  assert.equal(result.releaseId, 900);
+  assert.equal(result.releaseCleanupConfirmed, true);
+  assert.equal(result.uploadVerified, false);
+  assert.ok(remote.calls.every(call => call.url.startsWith(`https://gitee.com/api/v5/repos/${TARGET}/`) && ['GET', 'DELETE'].includes(call.method)));
+  assert.equal(remote.releases.get('v0.1.2'), remote.production);
+  assert.equal(remote.releases.has(TAG), false);
+});
+
+test('cleanup-only refuses a wrong known ID or production tag without deletion or acknowledgement', async t => {
+  const {resultFile, remote} = await fixture(t);
+  remote.releases.set(TAG, {id: 900, tag_name: TAG, name: `Perfboard upload probe ${TAG}`,
+    body: releaseMarker(TAG, SOURCE_COMMIT), target_commitish: SOURCE_COMMIT, prerelease: true});
+  for (const changed of [{releaseId: 999}, {releaseId: 1}, {releaseId: 900, tag: 'v0.1.2'}]) {
+    await assert.rejects(cleanupProbe({...remote.options(resultFile), ...changed}), /ownership changed|Only a uniquely named probe/);
+    assert.equal(remote.calls.some(call => call.method === 'DELETE'), false);
+    await assert.rejects(access(resultFile));
+  }
+  assert.equal(remote.releases.get('v0.1.2'), remote.production);
+});
+
+test('cleanup retries one read-only connection timeout without repeating DELETE or changing ownership guards', async t => {
+  const {resultFile, remote} = await fixture(t);
+  remote.releases.set(TAG, {id: 900, tag_name: TAG, name: `Perfboard upload probe ${TAG}`,
+    body: releaseMarker(TAG, SOURCE_COMMIT), target_commitish: SOURCE_COMMIT, prerelease: true});
+  let attempts = 0;
+  const fetchImpl = async (url, options) => {
+    if (url.endsWith('/releases/tags/' + TAG) && attempts++ === 0) {
+      const error = new TypeError('Synthetic connection timeout'); error.cause = {code: 'UND_ERR_CONNECT_TIMEOUT'}; throw error;
+    }
+    return remote.fetch(url, options);
+  };
+  const result = await cleanupProbe({...remote.options(resultFile), releaseId: 900, fetchImpl});
+  assert.equal(result.releaseCleanupConfirmed, true);
+  assert.equal(attempts, 3);
+  assert.equal(remote.calls.filter(call => call.method === 'DELETE').length, 1);
 });

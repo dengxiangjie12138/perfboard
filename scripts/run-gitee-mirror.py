@@ -29,9 +29,9 @@ def append_summary(environment: dict[str, str], text: str) -> None:
 
 def authorize(environment: dict[str, str]) -> bool:
     mode = environment.get("RUN_MODE", "sync")
-    if mode not in ("sync", "validate", "dry_run", "verify_upload"):
+    if mode not in ("sync", "validate", "dry_run", "verify_upload", "cleanup_upload"):
         raise ValueError("Unsupported mirror mode.")
-    allowed = mode not in ("sync", "verify_upload") or bool(environment.get("GITEE_TOKEN", "").strip())
+    allowed = mode not in ("sync", "verify_upload", "cleanup_upload") or bool(environment.get("GITEE_TOKEN", "").strip())
     if environment.get("GITHUB_OUTPUT"):
         with open(environment["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             output.write("mode=" + mode + "\nrun=" + str(allowed).lower() + "\n")
@@ -43,7 +43,7 @@ def authorize(environment: dict[str, str]) -> bool:
 
 
 def select_releases(environment: dict[str, str]) -> list[str]:
-    if environment.get("RUN_MODE") == "verify_upload":
+    if environment.get("RUN_MODE") in ("verify_upload", "cleanup_upload"):
         if environment.get("EVENT_NAME") != "workflow_dispatch":
             raise ValueError("Upload verification is available only through manual workflow dispatch.")
         return []
@@ -250,6 +250,62 @@ def verify_upload(source: Path, environment: dict[str, str]) -> None:
             raise ValueError("The isolated installer upload did not pass verification; temporary resources were removed.")
 
 
+def remote_probe_sha(git: Git, source: Path, reference: str) -> str | None:
+    lines = git("ls-remote", "--refs", "--tags", REMOTE, reference, cwd=source).stdout.strip().splitlines()
+    if not lines:
+        return None
+    if len(lines) != 1 or re.fullmatch(r"[0-9a-f]{40}\t" + re.escape(reference), lines[0]) is None:
+        raise ValueError("The temporary tag state is ambiguous; cleanup stopped.")
+    return lines[0].split("\t", 1)[0]
+
+
+def invoke_upload_cleanup(tag: str, release_id: int, commit: str, filename: Path, environment: dict[str, str]) -> None:
+    subprocess.run(["node", str(ROOT / "scripts/probe-gitee-upload.mjs"), "--cleanup-only", "--tag", tag,
+                    "--release-id", str(release_id), "--source-commit", commit, "--result-file", str(filename)],
+                   env=environment, check=True, cwd=ROOT)
+
+
+def cleanup_upload(source: Path, environment: dict[str, str]) -> None:
+    if environment.get("EVENT_NAME") != "workflow_dispatch" or not environment.get("GITEE_TOKEN", "").strip():
+        raise ValueError("Upload cleanup requires a manual dispatch with GITEE_TOKEN.")
+    tag, release_text = environment.get("REQUESTED_TAG", ""), environment.get("CLEANUP_RELEASE_ID", "")
+    if (PROBE_TAG.fullmatch(tag) is None or re.fullmatch(r"[1-9][0-9]*", release_text) is None
+            or len(release_text) > 16 or int(release_text) > 9007199254740991):
+        raise ValueError("Cleanup requires an exact temporary probe tag and a positive safe release ID; production tags are forbidden.")
+    release_id = int(release_text)
+    reference = "refs/tags/" + tag
+    with tempfile.TemporaryDirectory(prefix="perfboard-gitee-cleanup-", dir=environment.get("RUNNER_TEMP")) as temporary:
+        child = credential_environment(Path(temporary), environment)
+        child["GIT_TRACE"] = child["GIT_TRACE_CURL"] = "0"
+        child.pop("GIT_CURL_VERBOSE", None)
+        git = Git(child)
+        actual = git("rev-parse", "--verify", "refs/tags/v0.1.2^{commit}", cwd=source).stdout.strip()
+        if actual != PROBE_SOURCE_COMMIT:
+            raise ValueError("The fixed cleanup source commit changed; no writes were started.")
+        before = remote_probe_sha(git, source, reference)
+        if before is not None and before != PROBE_SOURCE_COMMIT:
+            raise ValueError("The temporary tag commit changed; refusing cleanup.")
+        filename = Path(temporary) / "cleanup-result.json"
+        print("Cleaning only isolated probe " + tag + " / Release " + str(release_id), flush=True)
+        try:
+            invoke_upload_cleanup(tag, release_id, PROBE_SOURCE_COMMIT, filename, child)
+        finally:
+            result = probe_result(filename, tag, PROBE_SOURCE_COMMIT)
+            if result is None or result["releaseId"] != release_id:
+                append_summary(environment, "### Gitee probe cleanup unconfirmed\n\nTemporary tag `" + tag
+                               + "` and Release `" + str(release_id) + "` need inspection. No tag was deleted.")
+                raise ValueError("Exact Release cleanup acknowledgement is missing; preserving temporary tag " + tag)
+            after = remote_probe_sha(git, source, reference)
+            if after is not None:
+                if before is None or after != PROBE_SOURCE_COMMIT:
+                    raise ValueError("The temporary tag changed during Release cleanup; preserving it.")
+                git("push", "--porcelain", "--force-with-lease=" + reference + ":" + PROBE_SOURCE_COMMIT,
+                    REMOTE, ":" + reference, cwd=source)
+            append_summary(environment, "### Gitee isolated probe cleanup completed\n\n"
+                           + "Owned Release `" + str(release_id) + "` and temporary tag `" + tag
+                           + "` are absent. No installer was uploaded. Production releases and update indexes were not modified.")
+
+
 def sync(tags: list[str], source: Path, environment: dict[str, str], remote: str = REMOTE) -> None:
     if not environment.get("GITEE_TOKEN", "").strip():
         raise ValueError("Mirror authorization is unavailable; no writes were started.")
@@ -321,6 +377,10 @@ def main(argv: list[str] | None = None) -> int:
             if tags:
                 raise ValueError("Isolated upload verification cannot select production releases.")
             verify_upload(ROOT, environment)
+        elif mode == "cleanup_upload":
+            if tags:
+                raise ValueError("Isolated cleanup cannot select production releases.")
+            cleanup_upload(ROOT, environment)
         else:
             sync(tags, ROOT, environment)
         return 0

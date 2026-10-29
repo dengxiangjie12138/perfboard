@@ -31,13 +31,23 @@ function ownRelease(release, expected, id = null) {
   return release.id;
 }
 
+async function readRelease(http, endpoint) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {return await http.api('gitee', 'GET', endpoint, undefined, true)}
+    catch (error) {
+      if (attempt !== 0 || !String(error?.message).includes('UND_ERR_CONNECT_TIMEOUT')) throw error;
+      http.report('Retrying one read-only cleanup request after a connection timeout');
+    }
+  }
+}
+
 async function cleanupRelease(http, expected, id, attempted) {
-  const byTag = await http.api('gitee', 'GET', `/releases/tags/${expected.tag}`, undefined, true);
+  const byTag = await readRelease(http, `/releases/tags/${expected.tag}`);
   if (byTag) {
     requireValue(attempted, 'A pre-existing release is not owned by this probe; cleanup refused');
     id = ownRelease(byTag, expected, id);
   }
-  const byId = id === null ? null : await http.api('gitee', 'GET', `/releases/${id}`, undefined, true);
+  const byId = id === null ? null : await readRelease(http, `/releases/${id}`);
   if (byId) {
     requireValue(attempted, 'A pre-existing release is not owned by this probe; cleanup refused');
     ownRelease(byId, expected, id);
@@ -46,11 +56,26 @@ async function cleanupRelease(http, expected, id, attempted) {
     try {await http.api('gitee', 'DELETE', `/releases/${id}`)} catch { /* Read back below. */ }
   }
   const [remainingTag, remainingId] = await Promise.all([
-    http.api('gitee', 'GET', `/releases/tags/${expected.tag}`, undefined, true),
-    id === null ? null : http.api('gitee', 'GET', `/releases/${id}`, undefined, true),
+    readRelease(http, `/releases/tags/${expected.tag}`),
+    id === null ? null : readRelease(http, `/releases/${id}`),
   ]);
   requireValue(remainingTag === null && remainingId === null, 'Probe release cleanup is unconfirmed; keep its owned tag for inspection');
   return id;
+}
+
+/** Recover only a previously created probe; never creates tags, releases or files on Gitee. */
+export async function cleanupProbe({tag, sourceCommit, releaseId, resultFile, giteeToken, fetchImpl, onProgress = () => {}} = {}) {
+  const marker = releaseMarker(tag, sourceCommit);
+  requireValue(Number.isSafeInteger(releaseId) && releaseId > 0, 'Cleanup requires the exact known positive probe release ID');
+  requireValue(giteeToken && typeof resultFile === 'string' && resultFile.length > 0, 'Cleanup requires configured credentials and a dedicated result file');
+  const expected = {tag, sourceCommit, marker, name: `Perfboard upload probe ${tag}`};
+  const http = new MirrorHttp({fetchImpl, giteeToken, onProgress});
+  try {await cleanupRelease(http, expected, releaseId, true)}
+  catch (error) {throw new Error(`Probe cleanup failed (owned tag ${tag}; release ${releaseId}): ${safeMessage(error, [giteeToken])}`)}
+  const result = {schemaVersion: 1, tag, sourceCommit, sourceTag: SOURCE_TAG, releaseId,
+    releaseMarker: marker, releaseCleanupConfirmed: true, uploadVerified: false};
+  await writeFile(resultFile, JSON.stringify(result, null, 2) + '\n', {flag: 'wx'});
+  return result;
 }
 
 export async function probeUpload({tag, sourceCommit, resultFile, publicKey, githubToken, giteeToken,
@@ -104,18 +129,26 @@ export async function probeUpload({tag, sourceCommit, resultFile, publicKey, git
 async function main(args) {
   const options = {};
   for (let index = 0; index < args.length; index++) {
-    const key = {'--tag': 'tag', '--source-commit': 'sourceCommit', '--result-file': 'resultFile'}[args[index]];
+    if (args[index] === '--cleanup-only') {options.cleanupOnly = true; continue}
+    const key = {'--tag': 'tag', '--source-commit': 'sourceCommit', '--result-file': 'resultFile', '--release-id': 'releaseId'}[args[index]];
     requireValue(key && args[index + 1] && !args[index + 1].startsWith('--'), 'Invalid upload probe option');
     options[key] = args[++index];
   }
-  const config = JSON.parse(await readFile(path.join(ROOT, 'src-tauri/tauri.conf.json'), 'utf8'));
-  options.publicKey = config.plugins?.updater?.pubkey;
-  options.githubToken = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  if (options.releaseId !== undefined) {
+    requireValue(/^[1-9]\d*$/.test(options.releaseId) && Number.isSafeInteger(Number(options.releaseId)), 'Invalid positive probe release ID');
+    options.releaseId = Number(options.releaseId);
+  }
+  requireValue(options.cleanupOnly || options.releaseId === undefined, 'A known release ID is only accepted for cleanup');
+  if (!options.cleanupOnly) {
+    const config = JSON.parse(await readFile(path.join(ROOT, 'src-tauri/tauri.conf.json'), 'utf8'));
+    options.publicKey = config.plugins?.updater?.pubkey;
+    options.githubToken = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+  }
   options.giteeToken = process.env.GITEE_TOKEN;
   options.onProgress = message => console.error(message);
-  const result = await probeUpload(options);
+  const result = await (options.cleanupOnly ? cleanupProbe : probeUpload)(options);
   console.log(JSON.stringify(result, null, 2));
-  if (!result.uploadVerified) process.exitCode = 1;
+  if (!options.cleanupOnly && !result.uploadVerified) process.exitCode = 1;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   main(process.argv.slice(2)).catch(error => {console.error(`Gitee upload probe failed: ${error.message}`); process.exitCode = 1});
