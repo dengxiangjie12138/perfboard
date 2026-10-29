@@ -458,7 +458,12 @@ export async function mirrorRelease({tag, updatesDirectory, dryRun = false, publ
   noSecrets(body, [githubToken, giteeToken]);
   const name = source.release.name || `Perfboard ${tag}`;
   let release = await http.api('gitee', 'GET', `/releases/tags/${tag}`, undefined, true);
-  if (release) requireValue(release.tag_name === tag && release.name === name && release.body === body && release.target_commitish === source.commit, 'Existing Gitee release differs from this exact mirror; no overwrite performed');
+  if (release) {
+    // Gitee's release editor serializes line breaks as CRLF. Accept only that
+    // representation change; preserve content, lone CRs and final newlines.
+    const sameBody = typeof release.body === 'string' && release.body.replaceAll('\r\n', '\n') === body.replaceAll('\r\n', '\n');
+    requireValue(release.tag_name === tag && release.name === name && sameBody && release.target_commitish === source.commit, 'Existing Gitee release differs from this exact mirror; no overwrite performed');
+  }
   else release = await http.api('gitee', 'POST', '/releases', {tag_name: tag, name, body, target_commitish: source.commit, prerelease: true});
   requireValue(Number.isSafeInteger(release.id) && release.id > 0, 'Gitee returned an invalid release ID');
   const names = [source.filename, source.filename + '.sig', 'latest.json', 'SHA256SUMS.txt'];

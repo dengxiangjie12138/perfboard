@@ -147,6 +147,30 @@ test('identical retries skip all uploads and do not replace existing public asse
   assert.equal(remote.patches, patches);
 });
 
+test('Gitee editor CRLF body representation resumes without reuploading or changing immutable metadata', async t => {
+  const folder = await directory(t), remote = new MockRemote();
+  await mirrorRelease(remote.options(folder));
+  const before = await readFile(path.join(folder, 'latest.json'));
+  const release = remote.releases.get('v0.1.2');
+  release.body = release.body.replaceAll('\n', '\r\n');
+  await mirrorRelease(remote.options(folder));
+  assert.equal(remote.uploads, 4);
+  assert.equal(remote.patches, 1);
+  assert.deepEqual(await readFile(path.join(folder, 'latest.json')), before);
+});
+
+test('release body content changes, lone CRs and removed final newlines still block resume without mutation', async t => {
+  const folder = await directory(t), remote = new MockRemote();
+  await mirrorRelease(remote.options(folder));
+  const release = remote.releases.get('v0.1.2'), original = release.body;
+  for (const changed of [original.replace('Release notes', 'Changed notes'), original.replaceAll('\n', '\r'), original.trimEnd()]) {
+    release.body = changed;
+    await assert.rejects(mirrorRelease(remote.options(folder)), /Existing Gitee release differs/);
+    assert.equal(remote.uploads, 4);
+    assert.equal(remote.patches, 1);
+  }
+});
+
 test('attachment metadata switching between tag aliases and ID paths remains byte-identical and idempotent', async t => {
   const folder = await directory(t), remote = new MockRemote();
   await mirrorRelease(remote.options(folder));
