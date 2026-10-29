@@ -51,6 +51,8 @@ node --test --test-isolation=none scripts/tests/mirror-gitee-release.node-test.m
 
 `mode=verify_upload` 仅可手动运行，需要已配置 `GITEE_TOKEN`；`tag` 留空、不要勾选 `seed_history`。它使用固定的已签名 `v0.1.2` 安装包，创建唯一的 `mirror-upload-probe-...` 临时标签和预发布，验证云端实际上传及公开下载的哈希与签名。它不修改正式版本、源码分支或更新索引，也不会自动重试上传。
 
+隔离探测使用 curl 原生 multipart 编码及 IPv4，curl 传输期限为 590 秒，外层总传输期限为 600 秒。日志只记录经过校验的传输字节数、耗时、IP、协议与 HTTP 状态，不记录令牌、请求正文或原始错误输出。
+
 只有确认临时 Release 已移除后，任务才按原始提交校验并删除自己创建的临时标签。归属发生变化、接口结果无法确认或标签被其他操作更新时，任务停止并在摘要中保留临时标签名称供检查；不会扩大清理范围或删除正式版本。该诊断与同步任务共用同一个串行队列。
 
 中断后需要恢复清理时，手动选择 `mode=cleanup_upload`，`tag` 填完整临时探测标签，`release_id` 填已确认的临时 Release ID，不勾选 `seed_history`。此模式仅核对归属并清理该临时 Release 与标签，不创建标签、发布或上传安装包；正式版本标签不被接受。标签已经不存在时仍可确认临时 Release 已清理，结果不明时保留资源并报错。

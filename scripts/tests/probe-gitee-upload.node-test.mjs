@@ -76,7 +76,7 @@ class ProbeRemote {
     return {tag: TAG, sourceCommit: SOURCE_COMMIT, resultFile, publicKey: this.publicKey,
       githubToken: 'fake-gh-token', giteeToken: 'fake-gitee-token', fetchImpl: this.fetch,
       uploadImpl: (url, options, policy) => {
-        assert.deepEqual(policy, {ipv4: true, timeoutMs: 110_000, nativeMultipart: true});
+        assert.deepEqual(policy, {ipv4: true, timeoutMs: 590_000, nativeMultipart: true});
         return this.fetch(url, options);
       }, expectedSha256: sha(this.bytes)};
   }
@@ -204,4 +204,21 @@ test('cleanup retries one read-only connection timeout without repeating DELETE 
   assert.equal(result.releaseCleanupConfirmed, true);
   assert.equal(attempts, 3);
   assert.equal(remote.calls.filter(call => call.method === 'DELETE').length, 1);
+});
+
+test('the slow-route probe keeps a ten-minute outer deadline and a shorter curl deadline', async t => {
+  const {resultFile, remote} = await fixture(t), deadlines = new WeakMap();
+  t.mock.method(AbortSignal, 'timeout', milliseconds => {
+    assert.ok(milliseconds <= 600_000);
+    const signal = new AbortController().signal;
+    deadlines.set(signal, milliseconds);
+    return signal;
+  });
+  const options = remote.options(resultFile), upload = options.uploadImpl;
+  options.uploadImpl = (url, request, policy) => {
+    assert.equal(deadlines.get(request.signal), 600_000);
+    assert.equal(policy.timeoutMs, 590_000);
+    return upload(url, request, policy);
+  };
+  assert.equal((await probeUpload(options)).uploadVerified, true);
 });

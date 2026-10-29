@@ -12,6 +12,8 @@ export const SOURCE_TAG = 'v0.1.2';
 export const SOURCE_COMMIT = '82a1c0af8c1ff950604a8b293093e71abd7ae920';
 export const SOURCE_SHA256 = '937702f9ef7746c4cb9448c0363ea19653dce83586527e6fae3b1945d76b2021';
 const TAG = /^mirror-upload-probe-[1-9]\d*-[1-9]\d*-[0-9a-f]{16}$/;
+const PROBE_TRANSFER_TIMEOUT_MS = 600_000;
+const PROBE_CURL_TIMEOUT_MS = 590_000;
 function requireValue(value, message) {if (!value) throw new Error(message)}
 export function releaseMarker(tag, sourceCommit) {
   requireValue(TAG.test(tag) && sourceCommit === SOURCE_COMMIT, 'Only a uniquely named probe of the fixed source release is allowed');
@@ -84,7 +86,7 @@ export async function probeUpload({tag, sourceCommit, resultFile, publicKey, git
   requireValue(giteeToken && typeof resultFile === 'string' && resultFile.length > 0, 'Probe requires configured credentials and a dedicated result file');
   const expected = {tag, sourceCommit, marker, name: `Perfboard upload probe ${tag}`};
   const boundedUpload = (url, options) => (uploadImpl ?? uploadGiteeCurl)(url,
-    {...options, signal: AbortSignal.timeout(120_000)}, {ipv4: true, timeoutMs: 110_000, nativeMultipart: true});
+    {...options, signal: AbortSignal.timeout(PROBE_TRANSFER_TIMEOUT_MS)}, {ipv4: true, timeoutMs: PROBE_CURL_TIMEOUT_MS, nativeMultipart: true});
   const http = new MirrorHttp({fetchImpl, uploadImpl: boundedUpload, githubToken, giteeToken, onProgress});
   let id = null, attempted = false, uploadVerified = false, failure = null;
   try {
@@ -104,7 +106,7 @@ export async function probeUpload({tag, sourceCommit, resultFile, publicKey, git
     // This experiment intentionally tests token-first multipart and IPv4.
     form.append('access_token', giteeToken);
     form.append('file', new Blob([installer], {type: 'application/vnd.microsoft.portable-executable'}), source.filename);
-    onProgress(`Uploading fixed signed installer to isolated probe ${id} (IPv4; 120s total limit)`);
+    onProgress(`Uploading fixed signed installer to isolated probe ${id} (IPv4; ${PROBE_TRANSFER_TIMEOUT_MS / 1000}s total limit)`);
     const attachment = await http.api('gitee', 'POST', `/releases/${id}/attach_files`, form);
     requireValue(attachment.name === source.filename && attachment.size === installer.length
       && Number.isSafeInteger(attachment.id) && attachment.id > 0, 'Probe upload returned different attachment metadata');
