@@ -25,6 +25,7 @@ const MAX_MULTIPART = MAX_EXE + 128 * 1024;
 const CURL_METRICS = '\nPERFBOARD_CURL_METRICS:';
 const CURL_METRICS_LIMIT = 512;
 const NETWORK_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET']);
+const READ_CONNECT_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT']);
 
 function networkFailure(context, error, timeout) {
   // Node errors can embed full URLs, headers or credentials in their message.
@@ -306,6 +307,19 @@ export class MirrorHttp {
     this.report = onProgress;
     this.upload = uploadImpl;
   }
+  async requestWithReadRetries({provider, scope, method, url, options, timeout, transport = this.fetch}) {
+    // One deadline per request/redirect hop, including every connect attempt.
+    // Only GET may be replayed, and only before response headers arrive.
+    const signal = AbortSignal.timeout(timeout), attempts = method === 'GET' ? 3 : 1;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {return await transport(url, {...options, method, signal, onProgress: this.report})}
+      catch (error) {
+        const code = [error?.code, error?.cause?.code].find(value => READ_CONNECT_CODES.has(value));
+        if (method !== 'GET' || !code || signal.aborted || attempt + 1 >= attempts) throw networkFailure(`${provider} ${scope} ${method}`, error, timeout);
+        this.report(`${provider} ${scope} ${method} connection retry ${attempt + 1}/${attempts - 1} after ${code}; ${timeout / 1000}s shared deadline`);
+      }
+    }
+  }
   async api(provider, method, endpoint, data, allowMissing = false) {
     const base = provider === 'github' ? GITHUB : GITEE;
     const url = base + endpoint;
@@ -323,10 +337,9 @@ export class MirrorHttp {
     }
     else if (data !== undefined) {body = new URLSearchParams(Object.entries(data).map(([key, value]) => [key, String(value)])); headers['Content-Type'] = 'application/x-www-form-urlencoded'}
     const timeout = data instanceof FormData ? UPLOAD_TIMEOUT_MS : API_TIMEOUT_MS;
-    let response;
     const transport = provider === 'gitee' && data instanceof FormData ? this.upload : this.fetch;
-    try {response = await transport(url, {method, headers, body, redirect: 'manual', signal: AbortSignal.timeout(timeout), onProgress: this.report})}
-    catch (error) {throw networkFailure(`${provider} API ${method}`, error, timeout)}
+    const response = await this.requestWithReadRetries({provider, scope: 'API', method, url, timeout, transport,
+      options: {headers, body, redirect: 'manual'}});
     if (allowMissing && response.status === 404 && method === 'GET') return null;
     requireValue(response.ok, `${provider} API ${method} failed (HTTP ${response.status})`);
     if (response.status === 204) return null;
@@ -342,10 +355,9 @@ export class MirrorHttp {
         ? host === 'github.com' || host.endsWith('.githubusercontent.com')
         : host === 'gitee.com' || host.endsWith('.gitee.com') || host.endsWith('.giteeusercontent.com') || host.endsWith('.aliyuncs.com');
       requireValue(allowed, 'Unexpected asset download host');
-      let response;
       // API credentials are deliberately absent even on the first download hop.
-      try {response = await this.fetch(url.href, {headers: {'User-Agent': 'Perfboard-Release-Mirror', 'Cache-Control': 'no-cache'}, redirect: 'manual', signal: AbortSignal.timeout(API_TIMEOUT_MS)})}
-      catch (error) {throw networkFailure(`${provider} public asset download`, error, API_TIMEOUT_MS)}
+      const response = await this.requestWithReadRetries({provider, scope: 'public asset download', method: 'GET', url: url.href,
+        timeout: API_TIMEOUT_MS, options: {headers: {'User-Agent': 'Perfboard-Release-Mirror', 'Cache-Control': 'no-cache'}, redirect: 'manual'}});
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         requireValue(response.headers.has('location'), 'Asset redirect has no location');
         url = httpsUrl(new URL(response.headers.get('location'), url).href);

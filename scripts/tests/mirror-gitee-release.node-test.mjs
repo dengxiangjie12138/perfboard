@@ -591,6 +591,78 @@ test('production upload defaults select the verified native multipart IPv4 path 
   await assert.rejects(access(filename));
 });
 
+test('metadata GET retries only connection failures under a single shared deadline', async t => {
+  const calls = [], timers = [], messages = [];
+  t.mock.method(AbortSignal, 'timeout', duration => {timers.push(duration); return new AbortController().signal});
+  const http = new MirrorHttp({giteeToken: 'fake-gitee-token', onProgress: message => messages.push(message), fetchImpl: async (_url, options) => {
+    calls.push(options);
+    if (calls.length < 3) {const error = new TypeError('private fake-gitee-token URL'); error.cause = {code: 'UND_ERR_CONNECT_TIMEOUT'}; throw error}
+    return json({id: 123});
+  }});
+  assert.deepEqual(await http.api('gitee', 'GET', '/releases/123'), {id: 123});
+  assert.equal(calls.length, 3);
+  assert.deepEqual(timers, [180_000]);
+  assert.ok(calls.every(call => call.signal === calls[0].signal));
+  assert.equal(messages.length, 2);
+  assert.ok(messages.every(message => message.includes('UND_ERR_CONNECT_TIMEOUT') && message.includes('180s shared deadline') && !message.includes('fake-gitee-token') && !message.includes('URL')));
+});
+
+test('metadata connection retries are bounded and never replay writes, HTTP failures or header timeouts', async () => {
+  for (const method of ['POST', 'PATCH', 'DELETE', 'GET']) {
+    let calls = 0;
+    const http = new MirrorHttp({fetchImpl: async () => {
+      calls++; const error = new TypeError('Synthetic connect failure'); error.cause = {code: 'UND_ERR_CONNECT_TIMEOUT'}; throw error;
+    }});
+    await assert.rejects(http.api('gitee', method, '/releases/123'), /UND_ERR_CONNECT_TIMEOUT/);
+    assert.equal(calls, method === 'GET' ? 3 : 1);
+  }
+  for (const result of ['http', 'headers']) {
+    let calls = 0;
+    const http = new MirrorHttp({fetchImpl: async () => {
+      calls++;
+      if (result === 'http') return json({}, 503);
+      const error = new TypeError('Synthetic headers timeout'); error.cause = {code: 'UND_ERR_HEADERS_TIMEOUT'}; throw error;
+    }});
+    await assert.rejects(http.api('gitee', 'GET', '/releases/123'), result === 'http' ? /HTTP 503/ : /UND_ERR_HEADERS_TIMEOUT/);
+    assert.equal(calls, 1);
+  }
+});
+
+test('anonymous public downloads retry connect failures separately per allowed redirect hop with shared hop deadlines', async t => {
+  const calls = [], timers = [], counts = new Map();
+  t.mock.method(AbortSignal, 'timeout', duration => {timers.push(duration); return new AbortController().signal});
+  const http = new MirrorHttp({githubToken: 'fake-gh-token', giteeToken: 'fake-gitee-token', fetchImpl: async (url, options) => {
+    calls.push({url, options});
+    const count = (counts.get(url) ?? 0) + 1; counts.set(url, count);
+    if ((url.startsWith('https://gitee.com/') && count < 3) || (url.startsWith('https://foruda.gitee.com/') && count < 2)) {
+      const error = new TypeError('Synthetic download connection failure'); error.cause = {code: 'UND_ERR_CONNECT_TIMEOUT'}; throw error;
+    }
+    if (url.startsWith('https://gitee.com/')) return new Response(null, {status: 302, headers: {Location: 'https://foruda.gitee.com/attachments/1?signature=temporary'}});
+    return new Response('public signed bytes');
+  }});
+  assert.equal((await http.download(`https://gitee.com/${TARGET}/attach_files/1/download/fixture.exe`, 'gitee')).toString(), 'public signed bytes');
+  assert.deepEqual(timers, [180_000, 180_000]);
+  assert.equal(calls.length, 5);
+  assert.ok(calls.slice(0, 3).every(call => call.options.signal === calls[0].options.signal));
+  assert.equal(calls[3].options.signal, calls[4].options.signal);
+  assert.notEqual(calls[0].options.signal, calls[3].options.signal);
+  assert.ok(calls.every(call => call.options.headers.Authorization === undefined && call.options.redirect === 'manual'));
+});
+
+test('anonymous download retry policy rejects unapproved redirects and never retries HTTP or partial-body failures', async () => {
+  for (const mode of ['redirect', 'http', 'body']) {
+    let calls = 0;
+    const http = new MirrorHttp({giteeToken: 'fake-gitee-token', fetchImpl: async () => {
+      calls++;
+      if (mode === 'redirect') return new Response(null, {status: 302, headers: {Location: 'https://evil.invalid/steal'}});
+      if (mode === 'http') return new Response(null, {status: 503});
+      return new Response(new ReadableStream({start(controller) {controller.error(new Error('Synthetic partial body failure'))}}));
+    }});
+    await assert.rejects(http.download(`https://gitee.com/${TARGET}/attach_files/1/download/fixture.exe`, 'gitee'), /Unexpected asset download host|HTTP 503|Synthetic partial body/);
+    assert.equal(calls, 1);
+  }
+});
+
 test('real curl native multipart sends an ordinary token field and exact file bytes to an isolated loopback receiver', async t => {
   let received;
   const server = createServer(async (request, response) => {

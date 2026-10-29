@@ -34,13 +34,8 @@ function ownRelease(release, expected, id = null) {
 }
 
 async function readRelease(http, endpoint) {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {return await http.api('gitee', 'GET', endpoint, undefined, true)}
-    catch (error) {
-      if (attempt !== 0 || !String(error?.message).includes('UND_ERR_CONNECT_TIMEOUT')) throw error;
-      http.report('Retrying one read-only cleanup request after a connection timeout');
-    }
-  }
+  // MirrorHttp centrally bounds safe GET connect retries under one deadline.
+  return http.api('gitee', 'GET', endpoint, undefined, true);
 }
 
 async function cleanupRelease(http, expected, id, attempted) {
