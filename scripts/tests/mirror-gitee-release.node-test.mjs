@@ -3,8 +3,10 @@ import {mkdtemp, readFile, rm, access} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {test} from 'node:test';
+import {EventEmitter} from 'node:events';
+import {PassThrough} from 'node:stream';
 import assert from 'node:assert/strict';
-import {mirrorRelease, MirrorHttp, SOURCE, TARGET} from '../mirror-gitee-release.mjs';
+import {mirrorRelease, MirrorHttp, uploadGiteeMultipart, SOURCE, TARGET} from '../mirror-gitee-release.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = (body, status = 200) => new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}});
@@ -96,7 +98,7 @@ class MockRemote {
     throw new Error('Unexpected mock HTTP request');
   };
   options(directory, tag = 'v0.1.2') {
-    return {tag, updatesDirectory: directory, publicKey: this.publicKey, githubToken: 'fake-gh-token', giteeToken: 'fake-gitee-token', fetchImpl: this.fetch};
+    return {tag, updatesDirectory: directory, publicKey: this.publicKey, githubToken: 'fake-gh-token', giteeToken: 'fake-gitee-token', fetchImpl: this.fetch, uploadImpl: this.fetch};
   }
 }
 
@@ -249,7 +251,7 @@ test('large attachment uploads have a bounded ten-minute deadline while metadata
     timeouts.push(duration);
     return new AbortController().signal;
   });
-  const http = new MirrorHttp({fetchImpl: async () => json({})});
+  const http = new MirrorHttp({fetchImpl: async () => json({}), uploadImpl: async () => json({})});
   await http.api('gitee', 'GET', '/releases');
   const form = new FormData();
   form.append('file', new Blob(['synthetic installer']), 'fixture.exe');
@@ -265,7 +267,8 @@ test('upload failures explain timeout or network categories without exposing raw
     const error = new Error('fake-gitee-token https://private.invalid/path?token=secret');
     error.name = name;
     error.cause = {code, message: 'secret Authorization: Bearer fake-gitee-token'};
-    const http = new MirrorHttp({giteeToken: 'fake-gitee-token', fetchImpl: async () => {requests++; throw error}});
+    const failedTransport = async () => {requests++; throw error};
+    const http = new MirrorHttp({giteeToken: 'fake-gitee-token', fetchImpl: failedTransport, uploadImpl: failedTransport});
     await assert.rejects(http.api('gitee', 'POST', '/releases/1/attach_files', form), failure => {
       assert.match(failure.message, expected);
       assert.ok(!failure.message.includes('fake-gitee-token') && !failure.message.includes('private.invalid') && !failure.message.includes('Authorization'));
@@ -288,7 +291,8 @@ test('CLI progress can identify each upload and verified public download without
 
 test('multipart credentials stay in a copied body to the fixed Gitee API and never reach GitHub or public downloads', async () => {
   const calls = [];
-  const http = new MirrorHttp({githubToken: 'fake-gh-token', giteeToken: 'fake-gitee-token', fetchImpl: async (url, options) => {calls.push({url, options}); return json({})}});
+  const transport = async (url, options) => {calls.push({url, options}); return json({})};
+  const http = new MirrorHttp({githubToken: 'fake-gh-token', giteeToken: 'fake-gitee-token', fetchImpl: transport, uploadImpl: transport});
   const form = new FormData();
   form.append('file', new Blob(['synthetic signature']), 'fixture.sig');
   await http.api('gitee', 'POST', '/releases/1/attach_files', form);
@@ -316,4 +320,102 @@ test('the small signature is uploaded and verified before the installer while re
   assert.deepEqual(result.assets.map(item => item.name), ['Perfboard_0.1.2_x64-setup.exe', 'Perfboard_0.1.2_x64-setup.exe.sig', 'latest.json', 'SHA256SUMS.txt']);
   const checksum = [...remote.attachments.values()].find(item => item.name === 'SHA256SUMS.txt').bytes.toString();
   assert.deepEqual(checksum.trim().split('\n').map(line => line.split('  ')[1]), result.assets.slice(0, 3).map(item => item.name));
+});
+
+function nativeRequestFixture({status = 201, headers = {}, chunks = [Buffer.from('{"id":1}')], stall = false, aborted = false} = {}) {
+  const calls = [];
+  const requestImpl = (url, options, onResponse) => {
+    const request = new EventEmitter();
+    request.destroyed = false;
+    request.destroy = () => {request.destroyed = true};
+    const call = {url, options, request};
+    calls.push(call);
+    request.end = bytes => {
+      call.bytes = bytes;
+      queueMicrotask(() => {
+        request.emit('finish');
+        const response = new PassThrough();
+        response.headers = headers;
+        response.statusCode = status;
+        call.response = response;
+        options.signal.addEventListener('abort', () => {
+          request.destroy(); response.destroy();
+          const error = new Error('Synthetic abort'); error.name = 'AbortError';
+          request.emit('error', error);
+        }, {once: true});
+        onResponse(response);
+        if (stall || response.destroyed) return;
+        if (aborted) {response.emit('aborted'); response.destroy(); return}
+        for (const chunk of chunks) response.write(chunk);
+        response.end();
+      });
+    };
+    return request;
+  };
+  return {calls, requestImpl};
+}
+
+function nativeOptions(signal) {
+  const form = new FormData();
+  form.append('file', new Blob(['synthetic signed installer']), 'fixture.exe');
+  form.append('access_token', 'fake-gitee-token');
+  return {method: 'POST', redirect: 'manual', headers: {Authorization: 'Bearer fake-gitee-token'}, body: form, ...(signal ? {signal} : {})};
+}
+const uploadUrl = `https://gitee.com/api/v5/repos/${TARGET}/releases/1/attach_files`;
+
+test('native HTTPS upload writes exact multipart bytes with known length, default TLS checks and an identity response', async () => {
+  const fixture = nativeRequestFixture(), progress = [];
+  const response = await uploadGiteeMultipart(uploadUrl, {...nativeOptions(), onProgress: message => progress.push(message)}, fixture);
+  assert.equal(response.status, 201);
+  assert.deepEqual(await response.json(), {id: 1});
+  assert.equal(fixture.calls.length, 1);
+  const {url, options, bytes} = fixture.calls[0];
+  assert.equal(url.href, uploadUrl);
+  assert.equal(options.rejectUnauthorized, true);
+  assert.equal(options.headers['content-length'], String(bytes.length));
+  assert.equal(options.headers['accept-encoding'], 'identity');
+  assert.equal(options.headers.authorization, 'Bearer fake-gitee-token');
+  assert.ok(bytes.subarray(-2).equals(Buffer.from('\r\n')));
+  const decoded = await new Response(bytes, {headers: {'content-type': options.headers['content-type']}}).formData();
+  assert.equal(decoded.get('file').name, 'fixture.exe');
+  assert.equal(await decoded.get('file').text(), 'synthetic signed installer');
+  assert.equal(decoded.get('access_token'), 'fake-gitee-token');
+  assert.equal(progress.length, 1);
+  assert.ok(progress[0].includes('request body written') && !progress[0].includes('fake-gitee-token'));
+});
+
+test('native upload total abort signal cancels waiting for response without using fetch', async () => {
+  const controller = new AbortController(), fixture = nativeRequestFixture({stall: true});
+  const pending = uploadGiteeMultipart(uploadUrl, nativeOptions(controller.signal), fixture);
+  const timer = setTimeout(() => controller.abort(), 15);
+  try {await assert.rejects(pending, /closed before completion|Synthetic abort/)} finally {clearTimeout(timer)}
+  assert.equal(fixture.calls[0].options.signal, controller.signal);
+  assert.equal(fixture.calls[0].request.destroyed, true);
+});
+
+test('native upload rejects a premature response close instead of returning partial success', async () => {
+  const fixture = nativeRequestFixture({aborted: true});
+  await assert.rejects(uploadGiteeMultipart(uploadUrl, nativeOptions(), fixture), /interrupted|closed before completion/);
+  assert.equal(fixture.calls[0].request.destroyed, true);
+});
+
+test('native upload enforces four-MiB response limits from both headers and streamed chunks', async () => {
+  for (const settings of [{headers: {'content-length': String(4 * 1024 * 1024 + 1)}}, {chunks: [Buffer.alloc(4 * 1024 * 1024 + 1)]}]) {
+    const fixture = nativeRequestFixture(settings);
+    await assert.rejects(uploadGiteeMultipart(uploadUrl, nativeOptions(), fixture), /exceeds the allowed size/);
+    assert.equal(fixture.calls[0].request.destroyed, true);
+    assert.equal(fixture.calls[0].response.destroyed, true);
+  }
+});
+
+test('native upload rejects other origins and API paths before opening a request, and never follows redirects', async () => {
+  const fixture = nativeRequestFixture({status: 302, headers: {location: 'https://evil.invalid/steal'}});
+  for (const url of ['https://evil.invalid/upload', uploadUrl + '?access_token=fake-gitee-token', uploadUrl.replace(TARGET, 'other/repo')]) {
+    await assert.rejects(uploadGiteeMultipart(url, nativeOptions(), fixture), /fixed Gitee attachment API/);
+  }
+  assert.equal(fixture.calls.length, 0);
+  const http = new MirrorHttp({giteeToken: 'fake-gitee-token', uploadImpl: (url, options) => uploadGiteeMultipart(url, options, fixture), fetchImpl: () => {throw new Error('Fetch must not handle multipart uploads')}});
+  await assert.rejects(http.api('gitee', 'POST', '/releases/1/attach_files', nativeOptions().body), /HTTP 302/);
+  assert.equal(fixture.calls.length, 1);
+  assert.equal(fixture.calls[0].url.origin, 'https://gitee.com');
 });

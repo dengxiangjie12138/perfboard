@@ -2,6 +2,7 @@
 /** Mirror verified public GitHub releases. Environment credentials go only to fixed API origins. */
 import {createHash} from 'node:crypto';
 import {mkdir, readFile, rename, writeFile} from 'node:fs/promises';
+import {request as httpsRequest} from 'node:https';
 import path from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {verifySignature} from './prepare-update-release.mjs';
@@ -16,6 +17,7 @@ const MAX_JSON = 4 * 1024 * 1024;
 const MINIMUM = [0, 1, 1];
 const API_TIMEOUT_MS = 180_000;
 const UPLOAD_TIMEOUT_MS = 600_000;
+const MAX_MULTIPART = MAX_EXE + 128 * 1024;
 const NETWORK_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET']);
 
 function networkFailure(context, error, timeout) {
@@ -77,12 +79,98 @@ async function responseBytes(response, limit) {
   return Buffer.concat(chunks);
 }
 
+/** Fixed-origin upload transport without fetch/Undici's separate header deadline. */
+export async function uploadGiteeMultipart(value, options, {requestImpl = httpsRequest} = {}) {
+  const url = httpsUrl(value);
+  requireValue(url.origin === 'https://gitee.com' && !url.search && !url.hash
+    && new RegExp(`^/api/v5/repos/${TARGET}/releases/[1-9][0-9]*/attach_files$`).test(url.pathname)
+    && options.method === 'POST' && options.redirect === 'manual'
+    && options.body instanceof FormData, 'Multipart uploads must target the fixed Gitee attachment API');
+  let payloadBytes = 0;
+  for (const [, value] of options.body) {
+    payloadBytes += value instanceof Blob ? value.size : Buffer.byteLength(value);
+    requireValue(payloadBytes <= MAX_MULTIPART, 'Multipart request exceeds the allowed size');
+  }
+  const signal = options.signal ?? AbortSignal.timeout(UPLOAD_TIMEOUT_MS);
+  signal.throwIfAborted();
+  const encoded = new Response(options.body);
+  const bytes = Buffer.from(await encoded.arrayBuffer());
+  requireValue(bytes.length <= MAX_MULTIPART, 'Multipart request exceeds the allowed size');
+  signal.throwIfAborted();
+  const headers = new Headers(options.headers);
+  headers.set('Content-Type', encoded.headers.get('Content-Type'));
+  headers.set('Content-Length', String(bytes.length));
+  headers.set('Accept-Encoding', 'identity');
+  // The signal starts before encoding and covers body upload, response headers,
+  // and response consumption. A socket inactivity timeout would not do that.
+  return new Promise((resolve, reject) => {
+    let completed = false;
+    const finish = (error, response) => {
+      if (completed) return;
+      completed = true;
+      if (error) reject(error); else resolve(response);
+    };
+    let request;
+    try {
+      request = requestImpl(url, {method: 'POST', headers: Object.fromEntries(headers), signal, rejectUnauthorized: true}, response => {
+        const length = response.headers['content-length'];
+        const declared = length === undefined ? null : Number(length);
+        if (declared !== null && (!Number.isSafeInteger(declared) || declared < 0 || declared > MAX_JSON)) {
+          finish(new Error('Remote response exceeds the allowed size'));
+          response.destroy(); request.destroy(); return;
+        }
+        const chunks = [];
+        let count = 0;
+        response.on('data', chunk => {
+          if (completed) return;
+          count += chunk.length;
+          if (count > MAX_JSON) {
+            finish(new Error('Remote response exceeds the allowed size'));
+            response.destroy(); request.destroy(); return;
+          }
+          chunks.push(Buffer.from(chunk));
+        });
+        response.once('error', error => {finish(error); request.destroy()});
+        response.once('aborted', () => {
+          const error = new Error('Upload response was interrupted');
+          error.code = 'ECONNRESET';
+          finish(error);
+          request.destroy();
+        });
+        response.once('close', () => {
+          if (completed) return;
+          const error = new Error('Upload response closed before completion');
+          error.code = 'ECONNRESET';
+          finish(error); request.destroy();
+        });
+        response.once('end', () => {
+          if (completed) return;
+          try {
+            const status = response.statusCode;
+            requireValue(Number.isInteger(status) && status >= 200 && status <= 599, 'Upload API returned an invalid status');
+            const responseHeaders = new Headers();
+            for (const [name, value] of Object.entries(response.headers)) {
+              if (value !== undefined) responseHeaders.set(name, Array.isArray(value) ? value.join(', ') : String(value));
+            }
+            const body = [204, 205, 304].includes(status) ? null : Buffer.concat(chunks);
+            finish(null, new Response(body, {status, headers: responseHeaders}));
+          } catch (error) {finish(error)}
+        });
+      });
+      request.once('error', error => finish(error));
+      request.once('finish', () => options.onProgress?.(`Gitee upload request body written (${bytes.length} bytes); waiting for response`));
+      request.end(bytes);
+    } catch (error) {finish(error)}
+  });
+}
+
 export class MirrorHttp {
-  constructor({fetchImpl = globalThis.fetch, githubToken, giteeToken, onProgress = () => {}} = {}) {
+  constructor({fetchImpl = globalThis.fetch, uploadImpl = uploadGiteeMultipart, githubToken, giteeToken, onProgress = () => {}} = {}) {
     this.fetch = fetchImpl;
     this.githubToken = githubToken;
     this.giteeToken = giteeToken;
     this.report = onProgress;
+    this.upload = uploadImpl;
   }
   async api(provider, method, endpoint, data, allowMissing = false) {
     const base = provider === 'github' ? GITHUB : GITEE;
@@ -102,7 +190,8 @@ export class MirrorHttp {
     else if (data !== undefined) {body = new URLSearchParams(Object.entries(data).map(([key, value]) => [key, String(value)])); headers['Content-Type'] = 'application/x-www-form-urlencoded'}
     const timeout = data instanceof FormData ? UPLOAD_TIMEOUT_MS : API_TIMEOUT_MS;
     let response;
-    try {response = await this.fetch(url, {method, headers, body, redirect: 'manual', signal: AbortSignal.timeout(timeout)})}
+    const transport = provider === 'gitee' && data instanceof FormData ? this.upload : this.fetch;
+    try {response = await transport(url, {method, headers, body, redirect: 'manual', signal: AbortSignal.timeout(timeout), onProgress: this.report})}
     catch (error) {throw networkFailure(`${provider} API ${method}`, error, timeout)}
     if (allowMissing && response.status === 404 && method === 'GET') return null;
     requireValue(response.ok, `${provider} API ${method} failed (HTTP ${response.status})`);
@@ -265,11 +354,11 @@ async function prepareIndexes(directory, source, manifest, latestTag, tokens) {
   return {directory: output, latestPromoted: promote, latestVersion: promote ? source.version : previousLatest?.version ?? null};
 }
 
-export async function mirrorRelease({tag, updatesDirectory, dryRun = false, publicKey, githubToken, giteeToken, fetchImpl, onProgress} = {}) {
+export async function mirrorRelease({tag, updatesDirectory, dryRun = false, publicKey, githubToken, giteeToken, fetchImpl, uploadImpl, onProgress} = {}) {
   const parsed = parseTag(tag);
   if (compare(parsed.parts, MINIMUM) < 0) return {status: 'skipped', tag, reason: 'Unsigned legacy release below v0.1.1 is not mirrored'};
   requireValue(dryRun || giteeToken, 'GITEE_TOKEN is required for release mirroring; dry-run needs no Gitee credentials');
-  const http = new MirrorHttp({fetchImpl, githubToken, giteeToken: dryRun ? undefined : giteeToken, onProgress});
+  const http = new MirrorHttp({fetchImpl, uploadImpl, githubToken, giteeToken: dryRun ? undefined : giteeToken, onProgress});
   const source = await githubRelease(http, tag, publicKey);
   noSecrets(JSON.stringify(source.manifest), [githubToken, giteeToken]);
   const latest = await http.api('github', 'GET', '/releases/latest');
