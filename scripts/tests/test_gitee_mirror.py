@@ -62,6 +62,28 @@ class MirrorTests(unittest.TestCase):
         self.assertEqual(refs, ["refs/heads/main", "refs/tags/v0.1.1", "refs/tags/v0.1.2"])
         self.assertEqual(self.git("--git-dir", str(self.remote), "rev-parse", "main"), self.head)
 
+    def test_git_executes_askpass_for_both_credentials_without_shell_command_in_environment(self):
+        helper_directory = self.root / "credential helper with spaces"
+        helper_directory.mkdir()
+        child = mirror.credential_environment(helper_directory, self.environment)
+        self.assertEqual(child["GIT_ASKPASS"], str(helper_directory / "askpass"))
+        # Exercise Git's actual askpass process launch, not a mocked subprocess
+        # or direct Python invocation. credential.fill needs no network and the
+        # empty credential.helper excludes all real OS credential stores.
+        result = subprocess.run(["git", "-c", "credential.helper=", "-c", "credential.useHttpPath=true",
+                                 "credential", "fill"], cwd=self.root, env=child,
+                                input="protocol=https\nhost=fixture.invalid\npath=fixture.git\n\n",
+                                text=True, capture_output=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        credentials = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+        self.assertEqual(credentials["username"], "deng-xiangjie")
+        self.assertEqual(credentials["password"], self.environment["GITEE_TOKEN"])
+        for helper in helper_directory.iterdir():
+            self.assertNotIn(self.environment["GITEE_TOKEN"], helper.read_text(encoding="utf-8"))
+        if os.name != "nt":
+            self.assertEqual((helper_directory / "askpass").stat().st_mode & 0o777, 0o700)
+            self.assertEqual((helper_directory / "askpass.py").stat().st_mode & 0o777, 0o600)
+
     def test_divergent_destination_is_not_force_pushed(self):
         other = self.root / "other"
         self.git("init", "--quiet", "--initial-branch=main", str(other))

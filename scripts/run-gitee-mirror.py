@@ -139,6 +139,30 @@ def mirror_release(tag: str, directory: Path, environment: dict[str, str], dry_r
     subprocess.run(command, env=environment, check=True, cwd=ROOT)
 
 
+def credential_environment(directory: Path, environment: dict[str, str]) -> dict[str, str]:
+    helper = directory / "askpass.py"
+    helper.write_text("import os, sys\n"
+                      "prompt = sys.argv[1].lower()\n"
+                      "key = 'GITEE_USERNAME' if 'username' in prompt else 'GITEE_TOKEN' if 'password' in prompt else None\n"
+                      "if key is None: raise SystemExit(1)\n"
+                      "sys.stdout.write(os.environ[key] + '\\n')\n", encoding="utf-8")
+    helper.chmod(0o600)
+    executable = directory / "askpass"
+    # GIT_ASKPASS names an executable, not a shell command with arguments.
+    # Keep both paths quoted inside the wrapper, including Python installations
+    # or runner temporary directories containing spaces. No credential is saved.
+    interpreter = Path(sys.executable).as_posix()
+    executable.write_text("#!/bin/sh\nexec " + shlex.quote(interpreter) + " "
+                          + shlex.quote(helper.as_posix()) + ' "$@"\n', encoding="utf-8", newline="\n")
+    executable.chmod(0o700)
+    child = environment.copy()
+    child["GITEE_USERNAME"] = "deng-xiangjie"
+    child["GIT_ASKPASS"] = str(executable)
+    child["GIT_TERMINAL_PROMPT"] = "0"
+    child["LC_ALL"] = "C"
+    return child
+
+
 def sync(tags: list[str], source: Path, environment: dict[str, str], remote: str = REMOTE) -> None:
     if not environment.get("GITEE_TOKEN", "").strip():
         raise ValueError("Mirror authorization is unavailable; no writes were started.")
@@ -146,18 +170,10 @@ def sync(tags: list[str], source: Path, environment: dict[str, str], remote: str
         raise ValueError("Invalid release selection; no writes were started.")
     with tempfile.TemporaryDirectory(prefix="perfboard-gitee-", dir=environment.get("RUNNER_TEMP")) as temporary:
         root = Path(temporary)
-        helper = root / "askpass.py"
-        helper.write_text("import os, sys\n"
-                          "prompt = sys.argv[1].lower()\n"
-                          "key = 'GITEE_USERNAME' if 'username' in prompt else 'GITEE_TOKEN' if 'password' in prompt else None\n"
-                          "if key is None: raise SystemExit(1)\n"
-                          "sys.stdout.write(os.environ[key] + '\\n')\n", encoding="utf-8")
-        helper.chmod(0o600)
-        child = environment.copy()
-        child["GITEE_USERNAME"] = "deng-xiangjie"
-        child["GIT_ASKPASS"] = shlex.quote(sys.executable) + " " + shlex.quote(str(helper))
-        child["GIT_TERMINAL_PROMPT"] = "0"
-        child["GIT_TRACE"] = child["GIT_TRACE_CURL"] = child["GIT_CURL_VERBOSE"] = "0"
+        child = credential_environment(root, environment)
+        child["GIT_TRACE"] = child["GIT_TRACE_CURL"] = "0"
+        # Unlike GIT_TRACE_CURL, any nonempty GIT_CURL_VERBOSE value enables it.
+        child.pop("GIT_CURL_VERBOSE", None)
         git = Git(child)
         git("rev-parse", "--verify", "refs/remotes/origin/main", cwd=source)
         names = git("for-each-ref", "--format=%(refname:strip=2)", "refs/tags", cwd=source).stdout.splitlines()
