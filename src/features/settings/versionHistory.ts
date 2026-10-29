@@ -4,8 +4,18 @@ export interface VersionHistoryEntry {version: string; dateRange: string; groups
 // Keep small updates merged into their actual application version.
 // Historical facts: CHANGELOG.md / README.md at dbefa503, and the corresponding
 // Git records from the initial 2026-10-01 app through dbefa503 on 2026-10-03.
-// Workflow entries below correspond to this implementation, still version 0.1.0.
 export const versionHistory: readonly VersionHistoryEntry[] = [{
+  version: '0.1.1',
+  dateRange: '2026-10-29',
+  groups: [
+    {label: '新增', items: [
+      '版本与说明增加手动检查更新；可开启启动时和每 6 小时自动检查，托盘运行时也生效。',
+      '发现新版后在左侧版本与说明显示更新标记；支持查看更新说明、下载并验证安装包。',
+      '安装版支持保存所有编辑窗口后重启更新；便携运行提供安装包下载和运行入口。',
+    ]},
+    {label: '调整', items: ['当前版本展示统一读取应用版本，历史版本单独保留。']},
+  ],
+}, {
   version: '0.1.0',
   dateRange: '2026-10-01 — 2026-10-23',
   groups: [

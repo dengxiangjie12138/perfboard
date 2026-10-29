@@ -1,7 +1,7 @@
 {
   "format": "perfboard-current-data-snapshot",
   "format_version": 1,
-  "created_at": "2026-10-26T17:09:36.312535+00:00",
+  "created_at": "2026-10-29T10:44:48.247245+00:00",
   "snapshot_consistency": "Each database is a complete read-only SQLite backup from one read transaction; separate databases are captured sequentially.",
   "logical_digest": "SHA256 of column names plus sorted, length-prefixed typed-row SHA256 digests; BLOBs contribute their byte length and SHA256. Duplicate rows are retained.",
   "excluded": [
@@ -13,8 +13,8 @@
   "files": {
     "repository/perfboard.sqlite3": {
       "kind": "sqlite",
-      "bytes": 7938048,
-      "sha256": "e6412e5610deb19a9f23a1b070b8722d9ef87394c8b214565f05576e72306d77",
+      "bytes": 8019968,
+      "sha256": "ff25a2db67a798f0299ff1aa84bb8b10e61611efddf7c4d3de559d261218d64d",
       "database": {
         "user_version": 6,
         "application_id": 1346781764,
@@ -42,15 +42,15 @@
             "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           },
           "dev_log_page_history": {
-            "rows": 163,
-            "logical_sha256": "cb4ee23d37cef4471d8fe5f55d586b9dfa7d5c6973a79ecd6d15f74f5407d9a2",
+            "rows": 177,
+            "logical_sha256": "eb91f15f2fe73a69ffcf935a60d32ef3e5511e2c38361fe3b1d463af2e2c1000",
             "blob_cells": 0,
             "blob_bytes": 0,
             "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           },
           "dev_log_pages": {
             "rows": 22,
-            "logical_sha256": "af817228737276fe55d49ceca4eedf162bc7e387e5149b2c95d67ccc285b9c2e",
+            "logical_sha256": "f4e7a0ffb679656eff927266d9d9345a08c407451eb63747610137c1fea39814",
             "blob_cells": 0,
             "blob_bytes": 0,
             "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -98,15 +98,15 @@
             "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           },
           "transformer_design_history": {
-            "rows": 12,
-            "logical_sha256": "89a2090d3a99c1181e30bb955b0a2777952a67d38d3b3683cdecae0895edb0f1",
+            "rows": 14,
+            "logical_sha256": "506a07ea13f2fb4c35dbd64f64247b4fb74506c12f5a73790e8a3174aae08784",
             "blob_cells": 0,
             "blob_bytes": 0,
             "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           },
           "transformer_designs": {
             "rows": 3,
-            "logical_sha256": "b47e47412ba4791768570dc32115bcdc64e098dacdc008d4107744a33b2987de",
+            "logical_sha256": "d79e553b353933fe4dd41b28013214c4d449b4e75d1ad666d185bf709ea03a67",
             "blob_cells": 0,
             "blob_bytes": 0,
             "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -123,21 +123,21 @@
         "opened_read_only": true,
         "consistent_read_transaction": true,
         "database_bytes_unchanged": true,
-        "wal_bytes_unchanged": true
+        "wal_bytes_unchanged": false
       }
     },
     "settings/activity-log.sqlite": {
       "kind": "sqlite",
-      "bytes": 344064,
-      "sha256": "2af1a8d5ffef2d9ac1c190279a44400944a7cf90fbbdfa551d85ead167845e79",
+      "bytes": 397312,
+      "sha256": "6e23e48f72db305b2a259ea03528cb741d578426507a3a6eccdf8e89e95dcc34",
       "database": {
         "user_version": 1,
         "application_id": 0,
         "schema_sha256": "04a954b16238d17515bbd2370127914adf684f85ca7c1041b22b7c79bddaf7d6",
         "tables": {
           "activity_segments": {
-            "rows": 1166,
-            "logical_sha256": "fd7707c65df16c06611e5852cdd77c2302e45f17bd4ff1862189adea6d3434c6",
+            "rows": 1338,
+            "logical_sha256": "52fcb07087cca5c21a188831b86ca4439d3acd720f555183c5adb7e350f86823",
             "blob_cells": 0,
             "blob_bytes": 0,
             "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -165,7 +165,7 @@
     "settings/standing-reminder.sqlite": {
       "kind": "sqlite",
       "bytes": 57344,
-      "sha256": "d051268cd530c36c2c8a8c078c7d2bfdcd36521b7c97a116488c258179722ecb",
+      "sha256": "1b9d971808cc3f41748760717cae60d2c2293a7a1beee3ac4095e5930ea7d1f9",
       "database": {
         "user_version": 0,
         "application_id": 0,
@@ -173,7 +173,7 @@
         "tables": {
           "fitness_state": {
             "rows": 1,
-            "logical_sha256": "84545e90c00911b1c0c3b0fd2940d015ca63d86e1dca724e4e28ae513de01344",
+            "logical_sha256": "563920c4d0412951fec0d61738831b4934ec45cc843d5a6d92cda665c4bb65ac",
             "blob_cells": 0,
             "blob_bytes": 0,
             "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -187,7 +187,7 @@
           },
           "reminder_state": {
             "rows": 1,
-            "logical_sha256": "f03826aebcaa16ba7c3cce8f4ab6a6a13e27c4e0a74fe88f8daf2a0b6b3d8739",
+            "logical_sha256": "a8e6a00cc63fb2e07f15ac68785409b1cbfec6664d3c8c19d7eec099ebbad2ec",
             "blob_cells": 0,
             "blob_bytes": 0,
             "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -205,7 +205,7 @@
     "settings/view-state.sqlite3": {
       "kind": "sqlite",
       "bytes": 12288,
-      "sha256": "671a9af27807792f77b791f9a8c6fc55d051f8dc71696379e9901cb7a57fec29",
+      "sha256": "6266057234b149b78d0254abe535bd7085c14074beb916be8d710031d1a63c70",
       "database": {
         "user_version": 1,
         "application_id": 1346524755,
@@ -213,7 +213,7 @@
         "tables": {
           "view_selections": {
             "rows": 2,
-            "logical_sha256": "6e160ba0a33516471b572e585df5e6bfd9f964064f12593d416c65d7184a9510",
+            "logical_sha256": "5e5cb1765b7e6b1baa6c0a2a3357d7ee50ec3c45d3e6c80c6ced15d8388b9617",
             "blob_cells": 0,
             "blob_bytes": 0,
             "blob_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"

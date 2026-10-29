@@ -1,24 +1,24 @@
 import {expect, it} from 'vitest';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {VersionHistoryPage} from './VersionHistoryPage';
+import {VersionEntry, VersionHistoryPage} from './VersionHistoryPage';
 import {versionHistory} from './versionHistory';
-import packageJson from '../../../package.json';
+import {currentVersion} from '../../services/version';
 
-it('merges small updates under the actual current version without invented historical releases', () => {
-  expect(versionHistory.map(entry => entry.version)).toEqual([packageJson.version]);
-  expect(packageJson.version).toBe('0.1.0');
-  expect(versionHistory[0].groups.map(group => group.label)).toEqual(['新增', '调整', '修复', '移除']);
-  expect(versionHistory[0].groups.every(group => group.items.length > 0)).toBe(true);
+it('keeps the prior release and lists update support under the new application version', () => {
+  expect(versionHistory.map(entry => entry.version)).toEqual([currentVersion, '0.1.0']);
+  expect(versionHistory[0].groups.find(group => group.label === '新增')?.items.join('')).toContain('每 6 小时');
+  expect(versionHistory[1].groups.map(group => group.label)).toEqual(['新增', '调整', '修复', '移除']);
 });
-it('starts collapsed and provides an accessible clickable version control with concise grouped changes', () => {
+it('starts history collapsed and marks only the actual current version', () => {
   const html = renderToStaticMarkup(<VersionHistoryPage/>);
-  expect(html).toContain('data-testid="version-0.1.0"');
-  expect(html).toContain('aria-expanded="false"');
-  expect(html).toContain('aria-controls="version-changes-0-1-0"');
-  expect(html).toContain('id="version-changes-0-1-0" class="version-changes" hidden=""');
-  for (const label of ['新增', '调整', '修复', '移除']) {
-    expect(html).toContain('<h3 id="version-changes-0-1-0-' + label + '">' + label + '</h3>');
-    expect(html).toContain('class="version-change-scroll" role="region" aria-labelledby="version-changes-0-1-0-' + label + '" tabindex="0"');
+  for (const entry of versionHistory) {
+    const id = 'version-changes-' + entry.version.replaceAll('.', '-');
+    expect(html).toContain('data-testid="version-' + entry.version + '"');
+    expect(html).toContain('aria-expanded="false" aria-controls="' + id + '"');
+    expect(html).toContain('id="' + id + '" class="version-changes" hidden=""');
   }
-  expect(html.match(/data-testid="version-/g)).toHaveLength(1);
+  expect(html.match(/>当前版本</g)).toHaveLength(1);
+  expect(renderToStaticMarkup(<VersionEntry entry={versionHistory[1]}/>)).not.toContain('当前版本');
+  expect(html).not.toContain('版本号保持');
+  expect(html).toContain('软件更新');
 });

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type ReactNode, type MouseEvent } from 'react';
-import { Home, Box, Layers, FileText, Settings, Database, History, BookOpen, type LucideIcon } from 'lucide-react';
+import { Home, Box, Layers, FileText, Settings, Database, History, BookOpen, ArrowUpCircle, type LucideIcon } from 'lucide-react';
 import type { NoteCategory, Page } from '../types';
 import { TOOL_GROUPS, TOOL_SECTIONS, TOOLS } from '../tools/registry';
 import type { AppRoute, Navigate, NavigationGroups } from './routes';
@@ -10,8 +10,9 @@ const NOTE_CATEGORIES: NoteCategory[] = ['硬件错题本', '软件错题本', '
 interface Props {
   route: AppRoute; disabled: boolean; groups: NavigationGroups;
   toggleGroup: (group: keyof NavigationGroups) => void; onNavigate: Navigate; onOpenWindow?: Navigate;
+  availableUpdateVersion?: string | null;
 }
-export function SidebarNav({ route, disabled, groups, toggleGroup, onNavigate, onOpenWindow }: Props) {
+export function SidebarNav({ route, disabled, groups, toggleGroup, onNavigate, onOpenWindow, availableUpdateVersion }: Props) {
   const [context,setContext]=useState<{route:AppRoute;x:number;y:number}|null>(null);
   useEffect(()=>{if(!context)return;const dismiss=()=>setContext(null);document.addEventListener('pointerdown',dismiss);document.addEventListener('scroll',dismiss,true);document.addEventListener('keydown',dismiss);return()=>{document.removeEventListener('pointerdown',dismiss);document.removeEventListener('scroll',dismiss,true);document.removeEventListener('keydown',dismiss);}},[context]);
   function menu(event:MouseEvent,next:AppRoute){event.preventDefault();if(!disabled&&onOpenWindow&&independentRoute(next))setContext({route:next,x:Math.min(event.clientX,window.innerWidth-205),y:Math.min(event.clientY,window.innerHeight-50)});}
@@ -19,6 +20,9 @@ export function SidebarNav({ route, disabled, groups, toggleGroup, onNavigate, o
     return <button disabled={disabled} className={'nav-row ' + (route.page === page ? 'active' : '')}
       aria-current={route.page === page ? 'page' : undefined} onClick={() => onNavigate({ page })} onContextMenu={event=>menu(event,{page})}>
       <Icon size={18} /><span>{label}</span>
+      {page === 'history' && availableUpdateVersion && <span className="nav-update-badge" role="img"
+        aria-label={'有新版本 ' + availableUpdateVersion} title={'有新版本 ' + availableUpdateVersion}>
+        <ArrowUpCircle size={15} aria-hidden="true"/></span>}
     </button>;
   }
   function group(id: keyof NavigationGroups, label: string, Icon: LucideIcon, children: ReactNode, active: boolean) {

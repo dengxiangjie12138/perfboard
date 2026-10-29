@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Perfboard",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.perfboard.toolbox",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -27,6 +27,7 @@
     }
   },
   "bundle": {
+    "createUpdaterArtifacts": true,
     "active": true,
     "targets": [
       "nsis"
@@ -53,5 +54,13 @@
       }
     },
     "useLocalToolsDir": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI1RjA1MkIxM0YyMzY5QTcKUldTbmFTTS9zVkx3SmFrTFVyRWc1TkRGdFo2L0srQWNrK0dOaDdwQ3h6NEp6bWlKaDQzVkdsVjMK",
+      "endpoints": ["https://github.com/dengxiangjie12138/perfboard/releases/latest/download/latest.json"],
+      "requireSignedVersion": true,
+      "windows": {"installMode": "passive"}
+    }
   }
 }

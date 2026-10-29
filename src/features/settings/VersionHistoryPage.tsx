@@ -2,6 +2,9 @@ import {useState} from 'react';
 import {ChevronDown, ChevronUp} from 'lucide-react';
 import {Heading} from '../../components/Common';
 import {versionHistory, type VersionHistoryEntry} from './versionHistory';
+import {currentVersion} from '../../services/version';
+import {useUpdates} from '../updates/UpdateContext';
+import {UpdatePanel} from '../updates/UpdatePanel';
 import './settings.css';
 
 export function VersionEntry({entry}: {entry: VersionHistoryEntry}) {
@@ -10,7 +13,7 @@ export function VersionEntry({entry}: {entry: VersionHistoryEntry}) {
   return <section className="card section">
     <button className="version-toggle" aria-expanded={expanded} aria-controls={detailId}
       data-testid={'version-' + entry.version} onClick={() => setExpanded(value => !value)}>
-      <strong>Perfboard {entry.version}</strong><span className="tag">当前版本</span>
+      <strong>Perfboard {entry.version}</strong>{entry.version === currentVersion && <span className="tag">当前版本</span>}
       {expanded ? <ChevronUp size={18} aria-hidden="true"/> : <ChevronDown size={18} aria-hidden="true"/>}</button>
     <p className="version-description">{entry.dateRange}</p>
     <div id={detailId} className="version-changes" hidden={!expanded}>{entry.groups.map(group =>
@@ -21,8 +24,10 @@ export function VersionEntry({entry}: {entry: VersionHistoryEntry}) {
   </section>;
 }
 export function VersionHistoryPage() {
+  const update = useUpdates();
   return <><Heading eyebrow="ABOUT PERFBOARD" title="关于与版本"
     description="物料仓库、笔记与工程工具，在本机完成。"/>
+    <UpdatePanel update={update}/>
     {versionHistory.map(entry => <VersionEntry key={entry.version} entry={entry}/>)}
-    <p className="help">点击版本号查看变更。小更新合并在同一版本下，版本号保持 0.1.0。</p></>;
+    <p className="help">点击版本号查看该版本的变更说明。</p></>;
 }

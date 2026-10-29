@@ -11,6 +11,7 @@ SilentInstall silent
 Var RepositoryPath
 Var RepositoryExitCode
 Var RepositoryCreate
+Var UpdateMode
 Var Failures
 Var TestLog
 LoadLanguageFile "${NSISDIR}\Contrib\Language files\English.nlf"

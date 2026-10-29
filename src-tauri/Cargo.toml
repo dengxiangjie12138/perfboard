@@ -1,6 +1,6 @@
 [package]
 name = "perfboard"
-version = "0.1.0"
+version = "0.1.1"
 description = "Local hardware engineering toolbox"
 authors = ["Perfboard"]
 edition = "2021"
@@ -21,6 +21,8 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "=2.7.0"
+tauri-plugin-updater = "=2.14.1"
+semver = "1"
 sha2 = "=0.10.9"
 rusqlite = { version = "0.37", features = ["bundled", "backup"] }
 serde = { version = "1", features = ["derive"] }
@@ -38,3 +40,4 @@ tempfile = "3"
 [target.'cfg(windows)'.dependencies]
 webview2-com = "=0.39.1"
 windows = "0.62"
+winreg = "0.55"

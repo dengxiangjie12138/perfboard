@@ -22,8 +22,11 @@ import { rememberedRoute } from './navigation/viewMemory';
 import { useViewScroll } from './services/useViewScroll';
 import { themePreference } from './services/theme';
 import { useResolvedTheme } from './services/useResolvedTheme';
+import { currentVersion } from './services/version';
+import { UpdateProvider, useUpdates } from './features/updates/UpdateContext';
 
-export default function App() {
+function AppShell() {
+  const update = useUpdates();
   const { data, repo, loading, error, message, setError } = useData();
   const [route, setRoute] = useState<AppRoute>({ page: 'workbench' });
   const [groups, setGroups] = useViewMemory<NavigationGroups>('navigation-groups', { hardware: false, stm32: false, utilities: true, notes: true });
@@ -109,9 +112,10 @@ export default function App() {
       <GlobalSearch data={data} query={sideQuery} onQuery={setSideQuery} disabled={loading || navigating} onNavigate={onNavigate}
         placement="sidebar" open={activeSearch==='sidebar'} onFocus={()=>setActiveSearch('sidebar')} onDismiss={()=>setActiveSearch(current=>current==='sidebar'?null:current)} />
       <SidebarNav route={route} disabled={loading || navigating} groups={groups} onNavigate={onNavigate} onOpenWindow={openIndependent}
+        availableUpdateVersion={update.status.available?.version}
         toggleGroup={group => setGroups(current => ({ ...current, [group]: !current[group] }))} />
       <div className="side-footer"><RepositoryConnection repo={repo} checking={loading} />
-        <small title={displayRepoPath ?? ''}>{displayRepoPath ?? '数据保存在你选择的目录'}</small><span>Perfboard · 0.1.0</span>
+        <small title={displayRepoPath ?? ''}>{displayRepoPath ?? '数据保存在你选择的目录'}</small><span>Perfboard · {currentVersion}</span>
       </div>
     </aside>
     {mobile && <button className="sidebar-shade" aria-label="关闭导航" onClick={() => setMobile(false)} />}
@@ -130,4 +134,8 @@ export default function App() {
     </div>
     {message && <div className="toast" role="status">{message}</div>}
   </div>;
+}
+
+export default function App() {
+  return <UpdateProvider><AppShell/></UpdateProvider>;
 }

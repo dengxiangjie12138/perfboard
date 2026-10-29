@@ -1,0 +1,110 @@
+# 软件更新与 GitHub 发布
+
+洞洞板使用 GitHub Releases 分发 Windows x64 NSIS 安装包。软件中的“自动检查更新”默认关闭；开启后启动时检查一次，运行期间每 6 小时检查，隐藏到托盘仍然生效。自动检查只提醒，下载和安装由用户主动操作。Gitee 镜像后续再接入。
+
+## 用户更新流程
+
+在“版本与说明”中点击“检查更新”。发现新版后，左侧菜单显示更新标记，页面显示新版号和说明。点击“下载更新”，下载并验证完成后，再点击“保存并重启更新”。只有全部窗口保存成功才会启动安装，安装完成后重新打开软件。
+
+更新模式只替换程序文件，保留数据库、附件和仓库路径配置；数据库版本迁移沿用正常启动时的备份和事务迁移流程。仓库未连接或路径失联不应阻止程序更新。便携模式可以检查和下载安装包，首次需手动运行安装包完成安装。
+
+`0.1.1` 是首个接入更新的版本。`0.1.0` 没有更新入口，需要先手动安装一次新版本。以后正式发布必须递增版本号；重新上传同版本 EXE 不会产生常规升级提示。
+
+## 更新签名密钥
+
+更新签名使用一对专用密钥。公钥保存在应用配置中，私钥必须保存在仓库之外，并额外保存在安全的离线介质或密码管理器中。私钥及密码不能放进 Git、GitHub Release、数据库快照或交付文件夹。更新签名与 Windows Authenticode 签名是不同用途。
+
+首次配置密钥时执行下列命令；**已有密钥时直接使用原密钥，不重新生成，不使用 `--force` 覆盖。**
+
+```powershell
+$updaterKeyPath = Join-Path $env:USERPROFILE '.tauri\perfboard-updater\perfboard.key'
+npm run tauri -- signer generate -w $updaterKeyPath
+```
+
+将生成的 `.pub` 文件内容写入 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`，不是填写文件路径。密钥丢失后，已安装版本不能信任另一把密钥签出的更新，需另行设计密钥轮换或手动重新安装。详见 [Tauri 更新签名说明](https://v2.tauri.app/plugin/updater/#signing-updates)。
+
+## 构建和签名
+
+发布前统一修改 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 中的版本。三个版本必须一致，例如下一版均为 `0.1.2`；发布标签使用 `v0.1.2`。
+
+应用配置启用 `bundle.createUpdaterArtifacts: true`、`plugins.updater.requireSignedVersion: true`，固定更新入口为：
+
+```text
+https://github.com/dengxiangjie12138/perfboard/releases/latest/download/latest.json
+```
+
+在当前 PowerShell 进程中设置构建环境变量。不要把私钥内容直接写在命令历史里，也不要输出或打印变量：
+
+```powershell
+$updaterKeyPath = Join-Path $env:USERPROFILE '.tauri\perfboard-updater\perfboard.key'
+$env:TAURI_SIGNING_PRIVATE_KEY = $updaterKeyPath
+# 若私钥设置了密码，从安全存储注入 TAURI_SIGNING_PRIVATE_KEY_PASSWORD。
+npm run tauri -- build --bundles nsis --ci
+Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY -ErrorAction SilentlyContinue
+Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
+```
+
+构建会生成 `Perfboard_<版本>_x64-setup.exe` 与同名 `.exe.sig`。本项目锁定的 Tauri CLI 2.12.1 支持签名绑定应用版本，`tauri build` 自动绑定；若单独对安装包补签名，必须传 `--app-version <版本>`：
+
+```powershell
+npm run tauri -- signer sign --private-key-path $updaterKeyPath --app-version 0.1.1 'src-tauri\target\release\bundle\nsis\Perfboard_0.1.1_x64-setup.exe'
+```
+
+`requireSignedVersion` 使下载包的签名版本必须与更新信息中的版本相同，避免旧包被配上较新版本号。不得为绕过失败而关闭签名或版本验证。命令参数可通过 `npm run tauri -- signer sign --help` 核对；参见 [Tauri CLI](https://v2.tauri.app/reference/cli/#signer-sign)。
+
+## 准备发布资产
+
+准备 UTF-8 Markdown 更新说明文件，再执行：
+
+```powershell
+node scripts/prepare-update-release.mjs `
+  --installer 'src-tauri\target\release\bundle\nsis\Perfboard_0.1.1_x64-setup.exe' `
+  --notes 'docs\releases\v0.1.1.md' `
+  --output 'deliverables\releases\v0.1.1'
+```
+
+脚本使用 Node 内置加密库，不需要安装依赖，也不会读取私钥或上传文件。它会：
+
+- 核对三个项目版本、稳定版号和安装包名称。
+- 使用应用配置公钥，实际验证 EXE 的 Minisign 签名及可信注释签名，检查签名内的版本与文件名。
+- 生成 `latest.json`，内嵌签名内容，下载地址固定指向此仓库对应 `v<版本>` Release 的 EXE。
+- 复制验证后的 EXE 和 `.sig`，生成 `SHA256SUMS.txt`。已有同名资产内容不同时停止，不自动覆盖。
+
+可加 `--verify-only` 仅校验而不生成文件；加 `--date '2026-10-29T12:00:00+08:00'` 指定发布信息时间，否则使用执行时的 UTC 时间。重复生成时如时间改变，`latest.json` 也会改变，因此应保留第一次生成的整套发布资产，或重复使用相同 `--date`。
+
+## 发布和验证
+
+在 GitHub 创建对应标签的草稿 Release，上传下列四个文件，确认完整后一起发布为正式最新版本：
+
+1. `Perfboard_<版本>_x64-setup.exe`
+2. `Perfboard_<版本>_x64-setup.exe.sig`
+3. `latest.json`
+4. `SHA256SUMS.txt`
+
+更新程序使用前三项；校验和供人工核对。不要把个人数据库放入更新安装包。只推送源码、只上传 EXE 或发布为预发布版本，都不等于正式更新源已经就绪。旧版本 Release 如果没有 `latest.json`，检查会提示更新服务尚未就绪，应保留明确错误而不是显示“已经最新”；完整更新版发布后，固定入口应能读取该清单。
+
+发布后核对固定更新入口能够下载正确的 `latest.json`，其中版本与对应 EXE、`.sig` 和标签一致。使用独立测试安装、合成仓库和隔离配置验证从上一版检查、下载、保存、安装和重启，核对数据与路径保留，不在个人实际仓库上试安装。
+
+发布脚本测试：
+
+```powershell
+node --test --test-isolation=none scripts/tests/prepare-update-release.node-test.mjs
+```
+
+测试只使用临时合成 EXE 和内存生成的临时 Ed25519 密钥，覆盖包被修改、签名/版本/文件名不匹配、可信注释被修改以及拒绝覆盖旧资产，不读取实际发布私钥，不连接 GitHub。
+
+## 隔离原生升级验收
+
+`scripts/validate-updater-native.py` 使用已有 CDP helper 和 `websocket-client`，针对提前准备好的独立测试安装器验证真实升级链路。测试安装器和应用必须使用相同的 GUID 测试产品名、独立应用标识及合成仓库；脚本拒绝普通产品、外部目录、目录联接和符号链接。所有路径及计划文件必须位于同一隔离根目录中。
+
+```powershell
+python scripts/validate-updater-native.py `
+  --plan '.quality\updater-native\plan.json' `
+  --signature '.quality\updater-native\update-0.1.1-setup.exe.sig'
+```
+
+计划包含 `validationRoot`、`productName`（`PerfboardUpdateValidation-` 加 32 位十六进制 GUID）、`manufacturer: "perfboard"`、`programDirectory`、`applicationConfigDirectory`、`repositoryDirectory`、`initialInstaller` 和 `updateInstaller`。签名由构建环节提前生成，验收脚本不需要生产私钥。`--inspect-plan` 只检查路径约束；默认使用本机 CDP 端口 9345 和随机本机 HTTP 端口，不连接 GitHub。
+
+使用 `.quality/updater-native` 这样的短测试根目录。GUID 测试产品名较长，Tauri 会在临时目录和安装文件名中各使用一次产品名；路径过深可能超过 Windows ShellExecute 的 260 字符限制。脚本会预先拒绝这种测试路径。
+
+脚本创建合成物料、笔记和附件，验证手动检查、侧栏标记、自动开关和隐藏托盘启动检查、篡改包拒绝、有效包下载、独立笔记窗口拒绝保存阻止安装、随后正常保存并升级和自动重启。最后比较核心记录、附件、仓库路径配置，退出并卸载 GUID 测试产品，清理其精确注册项，保留合成数据、截图和 JSON 报告。故障注入只包装该测试 WebView 的调试回调表，使真实保存屏障收到 `saved=false`，不修改应用代码或绕过验签。

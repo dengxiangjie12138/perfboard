@@ -820,6 +820,22 @@ pub fn flush(app: &tauri::AppHandle) -> Result<(), String> {
     persist_runtime(app)
 }
 
+/// A cancellable update saves current background state without stopping its workers.
+/// Installation failures must leave reminders and activity recording operational.
+pub fn checkpoint_for_update(app: &tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<StandingReminderService>();
+    {
+        let mut runtime = state.inner.lock().map_err(|_| "久坐提醒状态不可用")?;
+        let Runtime { log, engine, .. } = &mut *runtime;
+        log.close(engine);
+        if runtime.fitness_writable {
+            runtime.store.save_fitness(&runtime.fitness.checkpoint())?;
+        }
+        persist(&mut runtime)?;
+    }
+    persist_runtime(app)
+}
+
 pub const FITNESS_PROMPT_LABEL: &str = "fitness-prompt";
 const FITNESS_EVENT: &str = "perfboard:fitness";
 fn fitness_reader_allowed(window: &tauri::WebviewWindow) -> Result<(), String> {

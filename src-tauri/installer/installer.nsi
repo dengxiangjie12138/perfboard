@@ -177,8 +177,203 @@ Var RepositoryExistingRadio
 Var RepositoryCreate
 Var RepositorySelected
 Var RepositoryExitCode
+Var PerfboardInstallExitCode
+
+; Only a complete /UPDATE token enables the data-preserving update path.
+; /UPDATER, /UPDATE=value and an application /ARGS value are not installer flags.
+Function PerfboardParseUpdateFlag
+  Exch $0
+  Push $1
+  Push $2
+  Push $3
+  Push $4
+  Push $5
+  StrCpy $UpdateMode 0
+  System::Call 'shell32::CommandLineToArgvW(w r0, *i .r1) p .r2'
+  ${If} $2 P<> 0
+    StrCpy $3 1
+    perfboard_update_argv_loop:
+      ${If} $3 >= $1
+        Goto perfboard_update_argv_done
+      ${EndIf}
+      IntOp $4 $3 * 4
+      IntOp $4 $2 + $4
+      System::Call '*$4(p .r5)'
+      System::Call 'kernel32::lstrcmpiW(p r5, w "/ARGS") i .r4'
+      ${If} $4 = 0
+        IntOp $3 $3 + 2
+        Goto perfboard_update_argv_loop
+      ${EndIf}
+      System::Call 'kernel32::lstrcmpiW(p r5, w "/UPDATE") i .r4'
+      ${If} $4 = 0
+        StrCpy $UpdateMode 1
+        Goto perfboard_update_argv_done
+      ${EndIf}
+      IntOp $3 $3 + 1
+      Goto perfboard_update_argv_loop
+    perfboard_update_argv_done:
+      System::Call 'kernel32::LocalFree(p r2) p'
+  ${EndIf}
+  Pop $5
+  Pop $4
+  Pop $3
+  Pop $2
+  Pop $1
+  Pop $0
+FunctionEnd
+
+; Stack input/output: normalize a local installation directory, or return empty.
+; Preserve the caller's registers; registry values use the same normalization.
+Function PerfboardNormalizeInstallDirectory
+  Exch $0
+  Push $1
+  Push $2
+  Push $3
+  StrCpy $3 ""
+  StrLen $1 $0
+  ${If} $1 < 3
+  ${OrIf} $1 > 240
+    Goto perfboard_normalize_done
+  ${EndIf}
+  ${StrLoc} $1 "$0" '$\"' ">"
+  ${If} $1 != ""
+    Goto perfboard_normalize_done
+  ${EndIf}
+  System::Call 'shlwapi::PathIsRelativeW(w r0) i .r1'
+  ${If} $1 != 0
+    Goto perfboard_normalize_done
+  ${EndIf}
+  System::Call 'kernel32::GetFullPathNameW(w r0, i ${NSIS_MAX_STRLEN}, w .r1, p0) i .r2'
+  ${If} $2 = 0
+  ${OrIf} $2 >= ${NSIS_MAX_STRLEN}
+    Goto perfboard_normalize_done
+  ${EndIf}
+  StrCpy $2 $1 1 -1
+  ${If} $2 == "\"
+    StrCpy $1 $1 -1
+  ${EndIf}
+  ${GetRoot} "$1" $2
+  ${If} $1 == $2
+    Goto perfboard_normalize_done
+  ${EndIf}
+  StrCpy $3 $1
+  perfboard_normalize_done:
+  StrCpy $0 $3
+  Pop $3
+  Pop $2
+  Pop $1
+  Exch $0
+FunctionEnd
+
+; Application files may be replaced only in an ordinary, non-redirected directory.
+; This check is independent of whether a repository is connected.
+Function PerfboardInstallationPathCheck
+  StrCpy $PerfboardInstallExitCode 1
+  StrCpy $0 "$(InstallationBadPath)"
+  Push $INSTDIR
+  Call PerfboardNormalizeInstallDirectory
+  Pop $1
+  ${If} $1 == ""
+    Return
+  ${EndIf}
+  StrCpy $INSTDIR $1
+  StrCpy $5 $INSTDIR
+  perfboard_install_ancestor_loop:
+    System::Call 'kernel32::GetFileAttributesW(w r5) i .r1'
+    ${If} $1 != -1
+      IntOp $2 $1 & 16
+      ${If} $2 = 0
+        Return
+      ${EndIf}
+      IntOp $2 $1 & 1024
+      ${If} $2 != 0
+        StrCpy $0 "$(InstallationReparse)"
+        Return
+      ${EndIf}
+    ${EndIf}
+    ${GetParent} "$5" $2
+    ${If} $2 != ""
+    ${AndIf} $2 != $5
+      StrCpy $5 $2
+      Goto perfboard_install_ancestor_loop
+    ${EndIf}
+  ${If} $UpdateMode = 1
+    Call PerfboardUpdateRegistrationCheck
+    Return
+  ${EndIf}
+  StrCpy $PerfboardInstallExitCode 0
+FunctionEnd
+
+; An in-app update is an update of the registered current-user installation.
+; It never creates a new installation and never reads/writes a repository pointer.
+Function PerfboardUpdateRegistrationCheck
+  StrCpy $PerfboardInstallExitCode 1
+  StrCpy $0 "$(UpdateRegistrationMissing)"
+  ReadRegStr $1 HKCU "${MANUPRODUCTKEY}" ""
+  Push $1
+  Call PerfboardNormalizeInstallDirectory
+  Pop $1
+  ${If} $1 == ""
+  ${OrIf} $1 != $INSTDIR
+    Return
+  ${EndIf}
+  ReadRegStr $1 HKCU "${UNINSTKEY}" "InstallLocation"
+  ; Tauri writes InstallLocation surrounded by quotes; accept an unquoted value too.
+  StrCpy $2 $1 1
+  ${If} $2 == '$\"'
+    StrCpy $2 $1 1 -1
+    ${If} $2 != '$\"'
+      Return
+    ${EndIf}
+    StrCpy $1 $1 -1 1
+  ${EndIf}
+  Push $1
+  Call PerfboardNormalizeInstallDirectory
+  Pop $1
+  ${If} $1 == ""
+  ${OrIf} $1 != $INSTDIR
+    Return
+  ${EndIf}
+  ReadRegStr $1 HKCU "${UNINSTKEY}" "DisplayName"
+  ${If} $1 != "${PRODUCTNAME}"
+    Return
+  ${EndIf}
+  ReadRegStr $1 HKCU "${UNINSTKEY}" "Publisher"
+  ${If} $1 != "${MANUFACTURER}"
+    Return
+  ${EndIf}
+  ReadRegStr $1 HKCU "${UNINSTKEY}" "MainBinaryName"
+  ${If} $1 != "${MAINBINARYNAME}.exe"
+    Return
+  ${EndIf}
+  ReadRegStr $1 HKCU "${UNINSTKEY}" "UninstallString"
+  ${If} $1 != '$\"$INSTDIR\uninstall.exe$\"'
+    Return
+  ${EndIf}
+  StrCpy $5 "$INSTDIR\${MAINBINARYNAME}.exe"
+  StrCpy $6 0
+  perfboard_update_payload_loop:
+    System::Call 'kernel32::GetFileAttributesW(w r5) i .r1'
+    ${If} $1 = -1
+      Return
+    ${EndIf}
+    ; Both files must exist and must be regular files, not directories/reparse points.
+    IntOp $2 $1 & 1040
+    ${If} $2 != 0
+      Return
+    ${EndIf}
+    ${If} $6 = 0
+      StrCpy $6 1
+      StrCpy $5 "$INSTDIR\uninstall.exe"
+      Goto perfboard_update_payload_loop
+    ${EndIf}
+  StrCpy $PerfboardInstallExitCode 0
+FunctionEnd
 
 Function PerfboardRepositoryInit
+  ${If} $UpdateMode = 1
+    Return
+  ${EndIf}
   StrCpy $RepositoryPath "$DOCUMENTS\Perfboard"
   ReadRegStr $0 HKCU "${MANUPRODUCTKEY}" "RepositoryPath"
   ${If} $0 != ""
@@ -211,6 +406,7 @@ FunctionEnd
 
 Function PerfboardRepositoryPage
   ${If} $PassiveMode = 1
+  ${OrIf} $UpdateMode = 1
     Abort
   ${EndIf}
   !insertmacro MUI_HEADER_TEXT "$(RepositoryTitle)" "$(RepositorySubtitle)"
@@ -251,6 +447,9 @@ Function PerfboardRepositoryBrowse
 FunctionEnd
 
 Function PerfboardRepositoryLeave
+  ${If} $UpdateMode = 1
+    Return
+  ${EndIf}
   ${NSD_GetText} $RepositoryInput $RepositoryPath
   ${NSD_GetState} $RepositoryNewRadio $RepositoryCreate
   Call PerfboardRepositoryCheck
@@ -277,6 +476,10 @@ FunctionEnd
 ; Reject relative paths, volume roots, installation overlap and reparse points.
 ; Directory validation here is non-mutating; Rust verifies SQLite at install time.
 Function PerfboardRepositoryCheck
+  ${If} $UpdateMode = 1
+    StrCpy $RepositoryExitCode 0
+    Return
+  ${EndIf}
   StrCpy $RepositoryExitCode 1
   StrCpy $0 "$(RepositoryBadPath)"
   StrLen $1 $RepositoryPath
@@ -327,9 +530,8 @@ Function PerfboardRepositoryCheck
     StrCpy $0 "$(RepositoryOverlap)"
     Return
   ${EndIf}
-  ; Reject repository and installation junction/symlink ancestors.
+  ; Reject repository junction/symlink ancestors. Installation has its own check.
   StrCpy $5 "$RepositoryPath"
-  StrCpy $6 0
   repository_reparse_loop:
     System::Call 'kernel32::GetFileAttributesW(w r5) i .r1'
     ${If} $1 != -1
@@ -343,11 +545,6 @@ Function PerfboardRepositoryCheck
     ${If} $2 != ""
     ${AndIf} $2 != $5
       StrCpy $5 $2
-      Goto repository_reparse_loop
-    ${EndIf}
-    ${If} $6 = 0
-      StrCpy $6 1
-      StrCpy $5 "$INSTDIR"
       Goto repository_reparse_loop
     ${EndIf}
   ; A path naming an existing file cannot be a repository.
@@ -391,6 +588,32 @@ Function PerfboardRepositoryCheck
   ${EndIf}
   ClearErrors
   StrCpy $RepositoryExitCode 0
+FunctionEnd
+
+Function PerfboardRepositoryFinish
+  StrCpy $RepositoryExitCode 0
+  ${If} $UpdateMode = 1
+    Return
+  ${EndIf}
+  ; Check existing mode once more against directory replacement between pages.
+  ${If} $RepositoryCreate != 1
+    StrCpy $RepositoryExitCode 1
+    ClearErrors
+    ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --validate-repository "$RepositoryPath"' $RepositoryExitCode
+    ${If} $RepositoryExitCode != 0
+      StrCpy $0 "$(RepositoryValidationFailed)"
+      Return
+    ${EndIf}
+  ${EndIf}
+  ; Only ordinary installation delegates initialization to the application's data layer.
+  StrCpy $RepositoryExitCode 1
+  ClearErrors
+  ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --initialize-repository "$RepositoryPath"' $RepositoryExitCode
+  ${If} $RepositoryExitCode != 0
+    StrCpy $0 "$(RepositoryInitializeFailed)"
+    Return
+  ${EndIf}
+  WriteRegStr HKCU "${MANUPRODUCTKEY}" "RepositoryPath" "$RepositoryPath"
 FunctionEnd
 ; Installer pages, must be ordered as they appear
 ; 1. Welcome Page
@@ -689,6 +912,9 @@ LangString RepositoryNotEmpty 1033 "The new repository directory is not empty. C
 LangString RepositoryMissing 1033 "This directory has no perfboard.sqlite3. Choose a Perfboard repository or create a new one in an empty directory."
 LangString RepositoryValidationFailed 1033 "This is not a valid supported Perfboard repository, or its database is unavailable. No repository data or configuration has been changed."
 LangString RepositoryInitializeFailed 1033 "Repository setup failed. The directory may be read-only, in use, or contain an invalid or unsupported database. Existing data has been preserved. Installation did not complete; choose another directory and retry."
+LangString InstallationBadPath 1033 "Choose an absolute program directory (maximum 240 characters), not a volume root or an existing file."
+LangString InstallationReparse 1033 "The program directory must not contain junction or symbolic-link ancestors."
+LangString UpdateRegistrationMissing 1033 "This update must target the registered current-user Perfboard installation. Portable copies require a normal manual installation. Repository data and its configuration have not been changed."
 LangString RepositoryTitle 2052 "选择数据仓库目录"
 LangString RepositorySubtitle 2052 "元件、笔记和附件将保存在这里。"
 LangString RepositoryDescription 2052 "数据仓库与程序安装目录独立。可在空目录创建仓库，或选择已经存在的 Perfboard 仓库。已有仓库会验证数据库格式与版本。"
@@ -703,6 +929,9 @@ LangString RepositoryNotEmpty 2052 "新仓库目录不是空目录。请选择�
 LangString RepositoryMissing 2052 "目录中没有 perfboard.sqlite3。请选择已有 Perfboard 仓库，或在空目录创建新仓库。"
 LangString RepositoryValidationFailed 2052 "这不是有效且版本受支持的 Perfboard 仓库，或数据库当前不可用。未修改仓库数据与路径配置。"
 LangString RepositoryInitializeFailed 2052 "仓库设置失败：目录可能只读、被占用，或数据库格式/版本不正确。已有数据已保留，安装未完成；请重新安装并选择有效目录。"
+LangString InstallationBadPath 2052 "请选择绝对程序目录（最长 240 字符），不能是磁盘根目录或已有文件。"
+LangString InstallationReparse 2052 "程序目录不能含目录联接或符号链接。"
+LangString UpdateRegistrationMissing 2052 "更新必须指向本用户已登记的 Perfboard 安装目录。便携版请手动正常安装；仓库数据与路径配置未被修改。"
 Function .onInit
   ${GetOptions} $CMDLINE "/P" $PassiveMode
   ${IfNot} ${Errors}
@@ -714,10 +943,8 @@ Function .onInit
     StrCpy $NoShortcutMode 1
   ${EndIf}
 
-  ${GetOptions} $CMDLINE "/UPDATE" $UpdateMode
-  ${IfNot} ${Errors}
-    StrCpy $UpdateMode 1
-  ${EndIf}
+  Push "$CMDLINE"
+  Call PerfboardParseUpdateFlag
 
   !if "${DISPLAYLANGUAGESELECTOR}" == "true"
     !insertmacro MUI_LANGDLL_DISPLAY
@@ -755,6 +982,12 @@ FunctionEnd
 
 
 Section EarlyChecks
+  Call PerfboardInstallationPathCheck
+  ${If} $PerfboardInstallExitCode != 0
+    MessageBox MB_OK|MB_ICONSTOP "$0"
+    SetErrorLevel 2
+    Abort
+  ${EndIf}
   Call PerfboardRepositoryCheck
   ${If} $RepositoryExitCode != 0
     MessageBox MB_OK|MB_ICONSTOP "$0"
@@ -970,28 +1203,12 @@ Section Install
     Call CreateOrUpdateDesktopShortcut
   ${EndIf}
 
-  ; Check existing mode once more against directory replacement between pages.
-  ${If} $RepositoryCreate != 1
-    StrCpy $RepositoryExitCode 1
-    ClearErrors
-    ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --validate-repository "$RepositoryPath"' $RepositoryExitCode
-    ${If} $RepositoryExitCode != 0
-      MessageBox MB_OK|MB_ICONSTOP "$(RepositoryValidationFailed)"
-      SetErrorLevel 2
-      Abort
-    ${EndIf}
-  ${EndIf}
-  ; Delegate schema validation, explicit initialization and JSON serialization
-  ; to the same Rust data layer used by the application. No NSIS file writes.
-  StrCpy $RepositoryExitCode 1
-  ClearErrors
-  ExecWait '"$INSTDIR\${MAINBINARYNAME}.exe" --initialize-repository "$RepositoryPath"' $RepositoryExitCode
+  Call PerfboardRepositoryFinish
   ${If} $RepositoryExitCode != 0
-    MessageBox MB_OK|MB_ICONSTOP "$(RepositoryInitializeFailed)"
+    MessageBox MB_OK|MB_ICONSTOP "$0"
     SetErrorLevel 2
     Abort
   ${EndIf}
-  WriteRegStr HKCU "${MANUPRODUCTKEY}" "RepositoryPath" "$RepositoryPath"
 
   !ifmacrodef NSIS_HOOK_POSTINSTALL
     !insertmacro NSIS_HOOK_POSTINSTALL

@@ -17,6 +17,7 @@ mod tool_windows;
 mod transformer_designs;
 mod transformer_ipc;
 mod view_state;
+mod updates;
 mod workflow_ipc;
 use models::*;
 use repository::{validate_url, AppResult, RepositoryManager};
@@ -389,6 +390,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec!["--autostart"]),
@@ -418,6 +420,7 @@ pub fn run() {
             }
             standing_reminder::initialize(app.handle())?;
             dev_log_selection::initialize(app.handle())?;
+            updates::initialize(app.handle())?;
             let handle = app.handle().clone();
             app.state::<AppState>()
                 .backups
@@ -465,6 +468,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            updates::update_status,
+            updates::update_set_auto_check,
+            updates::update_check,
+            updates::update_download,
+            updates::update_install,
+            updates::update_open_installer,
             dev_log_pdf::dev_log_export_pdf,
             workflow_ipc::dev_log_folder_create,
             workflow_ipc::dev_log_folder_rename,
