@@ -1,0 +1,89 @@
+name: Mirror to Gitee
+
+"on":
+  push:
+    branches: [main]
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'sync 实际同步；validate 只跑隔离测试；dry_run 只读校验 GitHub 发布'
+        required: true
+        default: sync
+        type: choice
+        options: [sync, validate, dry_run]
+      tag:
+        description: '补同步正式版本，例如 v0.1.2；留空仅同步代码'
+        required: false
+        default: ''
+        type: string
+      seed_history:
+        description: '同时补齐已发布的 v0.1.1 和 v0.1.2'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+# queue:max preserves pending release runs when more main pushes arrive.
+concurrency:
+  group: perfboard-gitee-mirror
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  mirror:
+    if: >-
+      github.repository == 'dengxiangjie12138/perfboard' &&
+      (github.event_name != 'release' ||
+       (!github.event.release.draft && !github.event.release.prerelease))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout trusted main and published tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check mirror authorization
+        id: authorization
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          RUN_MODE: ${{ inputs.mode || 'sync' }}
+        run: python3 scripts/run-gitee-mirror.py --authorize-only
+
+      - name: Select published releases to mirror
+        id: releases
+        if: steps.authorization.outputs.run == 'true'
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          REQUESTED_TAG: ${{ inputs.tag }}
+          SEED_HISTORY: ${{ inputs.seed_history && 'true' || 'false' }}
+          RUN_MODE: ${{ steps.authorization.outputs.mode }}
+        run: python3 scripts/run-gitee-mirror.py --select-releases
+
+      - name: Prepare Node.js
+        if: steps.authorization.outputs.run == 'true' && (steps.releases.outputs.tags != '[]' || steps.authorization.outputs.mode == 'validate')
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Mirror or validate
+        if: steps.authorization.outputs.run == 'true'
+        env:
+          GITEE_TOKEN: ${{ steps.authorization.outputs.mode == 'sync' && secrets.GITEE_TOKEN || '' }}
+          GITEE_USERNAME: deng-xiangjie
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAGS: ${{ steps.releases.outputs.tags }}
+          RUN_MODE: ${{ steps.authorization.outputs.mode }}
+        run: python3 scripts/run-gitee-mirror.py
