@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Mirror verified public GitHub releases. Credentials are environment-only API headers. */
+/** Mirror verified public GitHub releases. Environment credentials go only to fixed API origins. */
 import {createHash} from 'node:crypto';
 import {mkdir, readFile, rename, writeFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -92,7 +92,13 @@ export class MirrorHttp {
     if (token) headers.Authorization = `Bearer ${token}`;
     if (provider === 'github') headers['X-GitHub-Api-Version'] = '2026-03-10';
     let body;
-    if (data instanceof FormData) body = data;
+    if (data instanceof FormData) {
+      body = new FormData();
+      for (const [key, value] of data) body.append(key, value);
+      // Match Gitee's documented/official CLI multipart authentication. Copy
+      // first so this credential can never contaminate a reused caller form.
+      if (provider === 'gitee' && token) body.set('access_token', token);
+    }
     else if (data !== undefined) {body = new URLSearchParams(Object.entries(data).map(([key, value]) => [key, String(value)])); headers['Content-Type'] = 'application/x-www-form-urlencoded'}
     const timeout = data instanceof FormData ? UPLOAD_TIMEOUT_MS : API_TIMEOUT_MS;
     let response;
@@ -280,9 +286,11 @@ export async function mirrorRelease({tag, updatesDirectory, dryRun = false, publ
   requireValue(Number.isSafeInteger(release.id) && release.id > 0, 'Gitee returned an invalid release ID');
   const names = [source.filename, source.filename + '.sig', 'latest.json', 'SHA256SUMS.txt'];
   const existing = uniqueAttachments(await attachmentList(http, release.id), names);
-  const verified = [];
-  verified.push(await ensureAttachment(http, release, existing, source.filename, source.assets[source.filename]));
-  verified.push(await ensureAttachment(http, release, existing, source.filename + '.sig', source.assets[source.filename + '.sig']));
+  // Verify the small signature upload first, before spending time transferring
+  // the installer. The published/checksum asset ordering remains unchanged.
+  const signature = await ensureAttachment(http, release, existing, source.filename + '.sig', source.assets[source.filename + '.sig']);
+  const installer = await ensureAttachment(http, release, existing, source.filename, source.assets[source.filename]);
+  const verified = [installer, signature];
   const mirror = structuredClone(source.manifest);
   mirror.platforms['windows-x86_64'].url = verified[0].url;
   const mirrorBytes = jsonBytes(mirror);

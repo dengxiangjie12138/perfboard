@@ -173,9 +173,11 @@ test('a different source/Gitee tag commit blocks creating a release', async t =>
 
 test('an interrupted upload never emits a usable pointer and can safely resume the staging release', async t => {
   const folder = await directory(t), remote = new MockRemote();
-  remote.failUpload = 'Perfboard_0.1.2_x64-setup.exe.sig';
+  remote.failUpload = 'Perfboard_0.1.2_x64-setup.exe';
   await assert.rejects(mirrorRelease(remote.options(folder)), /HTTP 503/);
   assert.equal(remote.releases.get('v0.1.2').prerelease, true);
+  assert.equal(remote.uploads, 1);
+  assert.equal([...remote.attachments.values()][0].name, 'Perfboard_0.1.2_x64-setup.exe.sig');
   await assert.rejects(access(path.join(folder, 'latest.json')));
   await mirrorRelease(remote.options(folder));
   assert.equal(remote.uploads, 4);
@@ -282,4 +284,36 @@ test('CLI progress can identify each upload and verified public download without
   assert.ok(messages.some(message => message.includes('Perfboard_0.1.2_x64-setup.exe') && message.includes('request limit 600s')));
   assert.ok(messages.every(message => !message.includes('fake-gh-token') && !message.includes('fake-gitee-token') && !message.includes('signature=') && !message.includes('https://')));
   assert.equal(result.status, 'mirrored');
+});
+
+test('multipart credentials stay in a copied body to the fixed Gitee API and never reach GitHub or public downloads', async () => {
+  const calls = [];
+  const http = new MirrorHttp({githubToken: 'fake-gh-token', giteeToken: 'fake-gitee-token', fetchImpl: async (url, options) => {calls.push({url, options}); return json({})}});
+  const form = new FormData();
+  form.append('file', new Blob(['synthetic signature']), 'fixture.sig');
+  await http.api('gitee', 'POST', '/releases/1/attach_files', form);
+  assert.equal(calls[0].url, `https://gitee.com/api/v5/repos/${TARGET}/releases/1/attach_files`);
+  assert.equal(calls[0].options.body.get('access_token'), 'fake-gitee-token');
+  assert.equal(calls[0].options.body.get('file').name, 'fixture.sig');
+  assert.equal(calls[0].options.redirect, 'manual');
+  assert.equal(form.has('access_token'), false);
+  await http.api('github', 'POST', '/fixture', form);
+  assert.equal(calls[1].options.body.has('access_token'), false);
+  await http.download(`https://gitee.com/${TARGET}/attach_files/1/download/fixture.sig`, 'gitee');
+  assert.equal(calls[2].options.body, undefined);
+  assert.equal(calls[2].options.headers.Authorization, undefined);
+  assert.ok(calls.every(call => !call.url.includes('fake-gitee-token') && !call.url.includes('access_token') && !call.url.includes('?')));
+});
+
+test('the small signature is uploaded and verified before the installer while result and checksum order stays immutable', async t => {
+  const remote = new MockRemote(), messages = [];
+  const result = await mirrorRelease({...remote.options(await directory(t)), onProgress: message => messages.push(message)});
+  const uploaded = [...remote.attachments.values()].map(item => item.name);
+  assert.deepEqual(uploaded, ['Perfboard_0.1.2_x64-setup.exe.sig', 'Perfboard_0.1.2_x64-setup.exe', 'latest.json', 'SHA256SUMS.txt']);
+  assert.ok(messages[0].startsWith('Uploading Gitee attachment Perfboard_0.1.2_x64-setup.exe.sig'));
+  assert.ok(messages[2].startsWith('Verified Gitee attachment Perfboard_0.1.2_x64-setup.exe.sig'));
+  assert.ok(messages[3].startsWith('Uploading Gitee attachment Perfboard_0.1.2_x64-setup.exe ('));
+  assert.deepEqual(result.assets.map(item => item.name), ['Perfboard_0.1.2_x64-setup.exe', 'Perfboard_0.1.2_x64-setup.exe.sig', 'latest.json', 'SHA256SUMS.txt']);
+  const checksum = [...remote.attachments.values()].find(item => item.name === 'SHA256SUMS.txt').bytes.toString();
+  assert.deepEqual(checksum.trim().split('\n').map(line => line.split('  ')[1]), result.assets.slice(0, 3).map(item => item.name));
 });
