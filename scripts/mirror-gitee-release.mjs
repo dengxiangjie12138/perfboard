@@ -20,6 +20,7 @@ const MAX_JSON = 4 * 1024 * 1024;
 const MINIMUM = [0, 1, 1];
 const API_TIMEOUT_MS = 180_000;
 const UPLOAD_TIMEOUT_MS = 600_000;
+const CURL_UPLOAD_TIMEOUT_MS = 590_000;
 const MAX_MULTIPART = MAX_EXE + 128 * 1024;
 const CURL_METRICS = '\nPERFBOARD_CURL_METRICS:';
 const CURL_METRICS_LIMIT = 512;
@@ -175,7 +176,7 @@ export async function uploadGiteeMultipart(value, options, {requestImpl = httpsR
 }
 
 /** Curl negotiates its own transport; credentials exist only in stdin's multipart body. */
-export async function uploadGiteeCurl(value, options, {spawnImpl = spawnProcess, ipv4 = false, timeoutMs = UPLOAD_TIMEOUT_MS, nativeMultipart = false} = {}) {
+export async function uploadGiteeCurl(value, options, {spawnImpl = spawnProcess, ipv4 = true, timeoutMs = CURL_UPLOAD_TIMEOUT_MS, nativeMultipart = true} = {}) {
   requireValue(Number.isInteger(timeoutMs) && timeoutMs >= 1000 && timeoutMs <= UPLOAD_TIMEOUT_MS, 'Invalid bounded upload timeout');
   const {url, signal, bytes, contentType} = await encodeGiteeMultipart(value, options);
   const marker = '\nPERFBOARD_HTTP_STATUS:';

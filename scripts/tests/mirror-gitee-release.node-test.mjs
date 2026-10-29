@@ -476,9 +476,15 @@ function curlFixture({status = 201, body = '{"id":1}', code = 0, stderr = '', st
   return {calls, spawnImpl};
 }
 
+// Retain explicit coverage of the previous wire format as a diagnostic option.
+// Production defaults are checked independently below.
+function legacyCurlUpload(url, options, configuration) {
+  return uploadGiteeCurl(url, options, {nativeMultipart: false, ipv4: false, timeoutMs: 600_000, ...configuration});
+}
+
 test('curl upload keeps credentials in stdin, disables config/redirects and preserves exact multipart bytes', async () => {
   const fixture = curlFixture();
-  const response = await uploadGiteeCurl(uploadUrl, nativeOptions(), fixture);
+  const response = await legacyCurlUpload(uploadUrl, nativeOptions(), fixture);
   assert.deepEqual(await response.json(), {id: 1});
   assert.equal(fixture.calls.length, 1);
   const {command, args, options, chunks} = fixture.calls[0];
@@ -502,7 +508,7 @@ test('curl upload keeps credentials in stdin, disables config/redirects and pres
 test('curl upload reports HTTP redirects without following them and preserves HTTP error codes', async () => {
   for (const status of [302, 413, 502]) {
     const fixture = curlFixture({status});
-    const http = new MirrorHttp({giteeToken: 'fake-gitee-token', uploadImpl: (url, options) => uploadGiteeCurl(url, options, fixture)});
+    const http = new MirrorHttp({giteeToken: 'fake-gitee-token', uploadImpl: (url, options) => legacyCurlUpload(url, options, fixture)});
     await assert.rejects(http.api('gitee', 'POST', '/releases/1/attach_files', nativeOptions().body), new RegExp('HTTP ' + status));
     assert.equal(fixture.calls.length, 1);
   }
@@ -511,7 +517,7 @@ test('curl upload reports HTTP redirects without following them and preserves HT
 test('curl timeouts and pipe errors expose only safe categories, never stderr or original error messages', async () => {
   for (const settings of [{code: 28, stderr: 'secret Authorization: Bearer fake-gitee-token'}, {pipeError: true}]) {
     const fixture = curlFixture(settings);
-    const http = new MirrorHttp({giteeToken: 'fake-gitee-token', uploadImpl: (url, options) => uploadGiteeCurl(url, options, fixture)});
+    const http = new MirrorHttp({giteeToken: 'fake-gitee-token', uploadImpl: (url, options) => legacyCurlUpload(url, options, fixture)});
     await assert.rejects(http.api('gitee', 'POST', '/releases/1/attach_files', nativeOptions().body), error => {
       assert.match(error.message, settings.code === 28 ? /timed out.*CURL_EXIT_28/ : /ECONNRESET/);
       assert.ok(!error.message.includes('fake-gitee-token') && !error.message.includes('Authorization') && !error.message.includes('sensitive'));
@@ -523,7 +529,7 @@ test('curl timeouts and pipe errors expose only safe categories, never stderr or
 
 test('curl total abort kills and reaps the process while waiting for a response', async () => {
   const fixture = curlFixture({stall: true}), controller = new AbortController();
-  const pending = uploadGiteeCurl(uploadUrl, nativeOptions(controller.signal), fixture);
+  const pending = legacyCurlUpload(uploadUrl, nativeOptions(controller.signal), fixture);
   const timer = setTimeout(() => controller.abort(), 15);
   try {await assert.rejects(pending, /deadline reached/)} finally {clearTimeout(timer)}
   assert.equal(fixture.calls[0].child.killed, true);
@@ -533,18 +539,18 @@ test('curl total abort kills and reaps the process while waiting for a response'
 test('curl bounds stdout and stderr and refuses other origins before spawning', async () => {
   for (const settings of [{body: Buffer.alloc(4 * 1024 * 1024 + 1024)}, {stderr: 'x'.repeat(16 * 1024 + 1)}]) {
     const fixture = curlFixture(settings);
-    await assert.rejects(uploadGiteeCurl(uploadUrl, nativeOptions(), fixture), /exceeds the allowed size|error output exceeded/);
+    await assert.rejects(legacyCurlUpload(uploadUrl, nativeOptions(), fixture), /exceeds the allowed size|error output exceeded/);
     assert.equal(fixture.calls[0].child.killed, true);
   }
   const fixture = curlFixture();
-  await assert.rejects(uploadGiteeCurl('https://evil.invalid/upload', nativeOptions(), fixture), /fixed Gitee attachment API/);
+  await assert.rejects(legacyCurlUpload('https://evil.invalid/upload', nativeOptions(), fixture), /fixed Gitee attachment API/);
   assert.equal(fixture.calls.length, 0);
 });
 
 test('curl diagnostics expose only validated numeric transfer metrics on success and timeout', async () => {
   for (const code of [0, 28]) {
     const fixture = curlFixture({code, status: code ? '000' : '201', metrics: '262144,0.1,0.3,0.4,110.01,203.0.113.5,2', stderr: 'Authorization fake-gitee-token'}), messages = [];
-    const pending = uploadGiteeCurl(uploadUrl, {...nativeOptions(), onProgress: message => messages.push(message)}, fixture);
+    const pending = legacyCurlUpload(uploadUrl, {...nativeOptions(), onProgress: message => messages.push(message)}, fixture);
     if (code) await assert.rejects(pending); else assert.deepEqual(await (await pending).json(), {id: 1});
     const metrics = messages.find(message => message.startsWith('Gitee curl transfer metrics '));
     assert.deepEqual(JSON.parse(metrics.slice('Gitee curl transfer metrics '.length)), {uploadBytes: 262144, connectSeconds: 0.1, tlsSeconds: 0.3, firstByteSeconds: 0.4, totalSeconds: 110.01, remoteIp: '203.0.113.5', httpVersion: '2', httpStatus: code ? 0 : 201});
@@ -570,6 +576,19 @@ test('native curl multipart puts only the credential in stdin and always removes
     assert.equal(Buffer.concat(fixture.calls[0].chunks).toString(), 'fake-gitee-token');
     await assert.rejects(access(publicFile));
   }
+});
+
+test('production upload defaults select the verified native multipart IPv4 path with a shorter curl deadline', async () => {
+  const fixture = curlFixture();
+  await uploadGiteeCurl(uploadUrl, nativeOptions(), fixture);
+  const {args, chunks} = fixture.calls[0];
+  assert.ok(args.includes('--ipv4'));
+  assert.equal(args[args.indexOf('--max-time') + 1], '590');
+  assert.ok(args.includes('--form') && args.includes('access_token=<-'));
+  assert.ok(!args.includes('--data-binary') && !args.some(value => value.startsWith('Content-Length:') || value.startsWith('Content-Type:')));
+  assert.equal(Buffer.concat(chunks).toString(), 'fake-gitee-token');
+  const filename = /^file=@"([^"]+)";/.exec(args.find(value => value.startsWith('file=@')))[1];
+  await assert.rejects(access(filename));
 });
 
 test('real curl native multipart sends an ordinary token field and exact file bytes to an isolated loopback receiver', async t => {
