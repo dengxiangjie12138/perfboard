@@ -1,5 +1,6 @@
 //! Public release metadata is discovery only. Installation still requires a fresh,
 //! signed updater manifest and native-owned verified bytes.
+use super::source::UpdateSource;
 use crate::repository::AppResult;
 use reqwest::{Client, Url};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -9,7 +10,7 @@ const REPOSITORY: &str = "dengxiangjie12138/perfboard";
 const API: &str = "https://api.github.com/repos/dengxiangjie12138/perfboard/releases";
 const MAX_RESPONSE: usize = 4 * 1024 * 1024;
 
-#[derive(Clone, Debug, Serialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseVersion {
     pub tag: String,
@@ -68,48 +69,55 @@ fn endpoint() -> AppResult<Url> {
     Url::parse(API).map_err(|e| e.to_string())
 }
 
-fn client() -> AppResult<Client> {
+fn client(source: UpdateSource) -> AppResult<Client> {
     // The updater installs a provider only when check() runs. The catalog can
     // open first, so initialize the same cached ring provider independently.
     let _ = rustls::crypto::ring::default_provider().install_default();
     Client::builder()
         .user_agent(concat!("Perfboard/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::none())
+        .redirect(source.redirects())
         .build()
         .map_err(|e| format!("无法准备版本列表请求：{e}"))
 }
 
-async fn request<T: DeserializeOwned>(client: &Client, url: Url) -> AppResult<T> {
-    let mut response = client
-        .get(url)
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2026-03-10")
+async fn request<T: DeserializeOwned>(
+    client: &Client,
+    source: UpdateSource,
+    url: Url,
+) -> AppResult<T> {
+    let mut request = client.get(url);
+    if source == UpdateSource::Github {
+        request = request
+            .header("Accept", "application/vnd.github+json")
+            .header("X-GitHub-Api-Version", "2026-03-10");
+    }
+    let mut response = request
         .send()
         .await
-        .map_err(|e| format!("无法读取 GitHub 版本列表，请检查网络后重试：{e}"))?;
+        .map_err(|e| format!("无法读取 {} 版本列表，请检查网络后重试：{e}", source.name()))?;
     let status = response.status();
     if !status.is_success() {
         return Err(match status.as_u16() {
-            403 | 429 => "GitHub 访问频率受限，请稍后重试".into(),
+            403 | 429 => format!("{} 访问频率受限，请稍后重试", source.name()),
             404 => "该正式版本已不存在，请刷新版本列表".into(),
-            _ => format!("GitHub 版本请求失败（HTTP {}）", status.as_u16()),
+            _ => format!("{} 版本请求失败（HTTP {}）", source.name(), status.as_u16()),
         });
     }
     if response
         .content_length()
         .is_some_and(|size| size > MAX_RESPONSE as u64)
     {
-        return Err("GitHub 版本信息过大".into());
+        return Err(format!("{} 版本信息过大", source.name()));
     }
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
         if bytes.len().saturating_add(chunk.len()) > MAX_RESPONSE {
-            return Err("GitHub 版本信息过大".into());
+            return Err(format!("{} 版本信息过大", source.name()));
         }
         bytes.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&bytes).map_err(|_| "GitHub 版本信息格式无效".into())
+    serde_json::from_slice(&bytes).map_err(|_| format!("{} 版本信息格式无效", source.name()))
 }
 
 fn asset<'a>(release: &'a Release, name: &str) -> Option<&'a Asset> {
@@ -199,15 +207,18 @@ fn versions(releases: Vec<Release>) -> Vec<ReleaseVersion> {
     entries.into_iter().map(|(_, entry)| entry).collect()
 }
 
-pub(super) async fn list() -> AppResult<Vec<ReleaseVersion>> {
-    let client = client()?;
+pub(super) async fn list(source: UpdateSource) -> AppResult<Vec<ReleaseVersion>> {
+    let client = client(source)?;
+    if source == UpdateSource::Gitee {
+        return gitee_versions(request(&client, source, source.index()?).await?);
+    }
     let mut releases = Vec::new();
     for page in 1..=10 {
         let mut url = endpoint()?;
         url.query_pairs_mut()
             .append_pair("per_page", "100")
             .append_pair("page", &page.to_string());
-        let page: Vec<Release> = request(&client, url).await?;
+        let page: Vec<Release> = request(&client, source, url).await?;
         let complete = page.len() < 100;
         releases.extend(page);
         if complete {
@@ -221,7 +232,8 @@ pub(super) async fn get(tag: &str) -> AppResult<Release> {
     stable_tag(tag)?;
     let mut url = endpoint()?;
     url.set_path(&format!("{}/tags/{tag}", url.path().trim_end_matches('/')));
-    let release: Release = request(&client()?, url).await?;
+    let release: Release =
+        request(&client(UpdateSource::Github)?, UpdateSource::Github, url).await?;
     published(&release)?;
     if release.tag_name != tag {
         return Err("GitHub 返回的版本与所选版本不符".into());
@@ -229,11 +241,56 @@ pub(super) async fn get(tag: &str) -> AppResult<Release> {
     Ok(release)
 }
 
-pub(super) fn page(tag: &str) -> AppResult<String> {
+fn gitee_versions(releases: Vec<ReleaseVersion>) -> AppResult<Vec<ReleaseVersion>> {
+    let mut entries = Vec::new();
+    for release in releases {
+        let version = stable_tag(&release.tag)?;
+        if release.version != version.to_string() || release.tag != format!("v{version}") {
+            return Err("Gitee 版本列表的版本号与标签不符".into());
+        }
+        entries.push((version, release));
+    }
+    entries.sort_by(|a, b| b.0.cmp(&a.0));
+    if entries.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+        return Err("Gitee 版本列表存在重复版本，请稍后重试".into());
+    }
+    Ok(entries.into_iter().map(|(_, release)| release).collect())
+}
+
+pub(super) async fn resolve(
+    source: UpdateSource,
+    tag: &str,
+) -> AppResult<(String, semver::Version)> {
+    let version = stable_tag(tag)?;
+    match source {
+        UpdateSource::Github => manifest(&get(tag).await?),
+        UpdateSource::Gitee => {
+            let release = list(source)
+                .await?
+                .into_iter()
+                .find(|release| release.tag == tag)
+                .ok_or("该 Gitee 正式版本已不存在，请刷新版本列表")?;
+            if !release.installable {
+                return Err("该版本仅支持从 Gitee 手动下载，不能在应用内安装".into());
+            }
+            Ok((source.manifest(tag)?.to_string(), version))
+        }
+    }
+}
+
+pub(super) async fn exists(source: UpdateSource, tag: &str) -> AppResult<()> {
     stable_tag(tag)?;
-    Ok(format!(
-        "https://github.com/{REPOSITORY}/releases/tag/{tag}"
-    ))
+    match source {
+        UpdateSource::Github => {
+            get(tag).await?;
+        }
+        UpdateSource::Gitee => {
+            if !list(source).await?.iter().any(|release| release.tag == tag) {
+                return Err("该 Gitee 正式版本已不存在，请刷新版本列表".into());
+            }
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -302,7 +359,10 @@ mod tests {
         ] {
             assert!(stable_tag(tag).is_err());
         }
-        assert!(page("v0.1.0").unwrap().ends_with("/releases/tag/v0.1.0"));
+        assert!(UpdateSource::Github
+            .page("v0.1.0")
+            .unwrap()
+            .ends_with("/releases/tag/v0.1.0"));
     }
     #[test]
     fn missing_one_signature_asset_never_becomes_installable() {
@@ -311,9 +371,96 @@ mod tests {
         assert!(manifest(&item).is_err());
         assert!(!versions(vec![item])[0].installable);
     }
+    fn gitee_release(version: &str) -> ReleaseVersion {
+        ReleaseVersion {
+            tag: format!("v{version}"),
+            version: version.into(),
+            notes: None,
+            pub_date: None,
+            installable: true,
+        }
+    }
+    #[test]
+    fn gitee_index_is_sorted_semantically_and_rejects_ambiguous_entries() {
+        let versions = gitee_versions(vec![
+            gitee_release("0.1.2"),
+            gitee_release("0.1.10"),
+            gitee_release("0.1.1"),
+        ])
+        .unwrap();
+        assert_eq!(
+            versions
+                .iter()
+                .map(|item| item.version.as_str())
+                .collect::<Vec<_>>(),
+            ["0.1.10", "0.1.2", "0.1.1"]
+        );
+        let mut bad = gitee_release("0.1.1");
+        bad.tag = "v0.1.2".into();
+        assert!(gitee_versions(vec![bad]).is_err());
+        assert!(gitee_versions(vec![gitee_release("0.1.1"), gitee_release("0.1.1")]).is_err());
+        let mut pre = gitee_release("0.1.2-beta.1");
+        assert!(gitee_versions(vec![pre.clone()]).is_err());
+        pre.tag = "../latest".into();
+        assert!(gitee_versions(vec![pre]).is_err());
+    }
+
+    #[test]
+    fn gitee_selection_is_resolved_from_a_fresh_public_index() {
+        use std::io::{Read, Write};
+        struct Restore(Option<std::ffi::OsString>);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                if let Some(value) = &self.0 {
+                    std::env::set_var("PERFBOARD_TEST_GITEE_INDEX_ENDPOINT", value);
+                } else {
+                    std::env::remove_var("PERFBOARD_TEST_GITEE_INDEX_ENDPOINT");
+                }
+            }
+        }
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            for index in 0..3 {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut bytes = [0; 8192];
+                let count = stream.read(&mut bytes).unwrap();
+                let request = String::from_utf8_lossy(&bytes[..count]).to_ascii_lowercase();
+                assert!(request.starts_with("get /updates/versions.json "));
+                assert!(!request.contains("authorization:"));
+                let releases = if index == 0 {
+                    vec![gitee_release("0.1.1"), gitee_release("0.1.2")]
+                } else {
+                    vec![gitee_release("0.1.1")]
+                };
+                let body = serde_json::to_vec(&releases).unwrap();
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).unwrap();
+                stream.write_all(&body).unwrap();
+            }
+        });
+        let _restore = Restore(std::env::var_os("PERFBOARD_TEST_GITEE_INDEX_ENDPOINT"));
+        std::env::set_var(
+            "PERFBOARD_TEST_GITEE_INDEX_ENDPOINT",
+            format!("http://{address}/updates/versions.json"),
+        );
+        tauri::async_runtime::block_on(async {
+            assert_eq!(list(UpdateSource::Gitee).await.unwrap()[0].version, "0.1.2");
+            assert!(resolve(UpdateSource::Gitee, "v0.1.2")
+                .await
+                .unwrap_err()
+                .contains("不存在"));
+            let (manifest, version) = resolve(UpdateSource::Gitee, "v0.1.1").await.unwrap();
+            assert_eq!(
+                manifest,
+                format!("http://{address}/updates/releases/v0.1.1.json")
+            );
+            assert_eq!(version, semver::Version::new(0, 1, 1));
+        });
+        server.join().unwrap();
+    }
     #[test]
     fn catalog_client_initializes_tls_before_any_updater_check() {
-        assert!(client().is_ok());
+        assert!(client(UpdateSource::Github).is_ok());
         assert!(rustls::crypto::CryptoProvider::get_default().is_some());
     }
     #[test]
@@ -335,7 +482,8 @@ mod tests {
                 .unwrap();
         });
         let error = tauri::async_runtime::block_on(request::<Vec<Release>>(
-            &client().unwrap(),
+            &client(UpdateSource::Github).unwrap(),
+            UpdateSource::Github,
             Url::parse(&format!("http://{address}/releases")).unwrap(),
         ))
         .unwrap_err();
@@ -396,7 +544,7 @@ mod tests {
             format!("http://{address}/releases"),
         );
         tauri::async_runtime::block_on(async {
-            let versions = list().await.unwrap();
+            let versions = list(UpdateSource::Github).await.unwrap();
             assert_eq!(versions.len(), 101);
             assert_eq!(versions[0].version, "0.2.0");
             assert_eq!(get("v0.1.1").await.unwrap().tag_name, "v0.1.1");

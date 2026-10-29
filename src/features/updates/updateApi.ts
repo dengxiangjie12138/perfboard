@@ -1,10 +1,13 @@
 import {invoke} from '@tauri-apps/api/core';
 import {currentVersion} from '../../services/version';
+export type UpdateSource = 'github' | 'gitee';
+export function updateSourceLabel(source: UpdateSource): string {return source === 'gitee' ? 'Gitee 国内镜像' : 'GitHub'}
 
 export interface AvailableUpdate {version: string; notes: string | null; pubDate: string | null}
 export interface ReleaseVersion extends AvailableUpdate {tag: string; installable: boolean}
 export interface UpdateStatus {
   currentVersion: string;
+  source: UpdateSource;
   autoCheckEnabled: boolean;
   lastCheckedAt: string | null;
   available: AvailableUpdate | null;
@@ -17,12 +20,13 @@ export interface UpdateStatus {
   installerPath: string | null;
 }
 export function initialUpdateStatus(): UpdateStatus {
-  return {currentVersion, autoCheckEnabled: false, lastCheckedAt: null, available: null, target: null,
+  return {currentVersion, source: 'github', autoCheckEnabled: false, lastCheckedAt: null, available: null, target: null,
     phase: 'idle', downloadedBytes: 0, totalBytes: null, error: null,
     installation: 'portable', installerPath: null};
 }
 export const updateApi = {
   status: () => invoke<UpdateStatus>('update_status'),
+  setSource: (source: UpdateSource) => invoke<UpdateStatus>('update_set_source', {source}),
   setAutoCheck: (enabled: boolean) => invoke<UpdateStatus>('update_set_auto_check', {enabled}),
   check: () => invoke<UpdateStatus>('update_check'),
   download: () => invoke<UpdateStatus>('update_download'),

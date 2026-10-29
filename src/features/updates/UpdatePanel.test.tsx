@@ -10,17 +10,31 @@ vi.mock('../../state/DataContext', () => ({useData: () => ({error: null})}));
 function model(status: Partial<UpdateStatus> = {}, view: Partial<UpdateContextValue> = {}): UpdateContextValue {
   return {status: {...initialUpdateStatus(), ...status}, supported: true, loading: false, pendingAction: null,
     versions: null, versionsLoading: false, versionsError: null, listVersions: vi.fn(), downloadVersion: vi.fn(), openRelease: vi.fn(),
-    check: vi.fn(), setAutoCheck: vi.fn(), download: vi.fn(), install: vi.fn(), openInstaller: vi.fn(), ...view};
+    check: vi.fn(), setSource: vi.fn(), setAutoCheck: vi.fn(), download: vi.fn(), install: vi.fn(), openInstaller: vi.fn(), ...view};
 }
 const available = {version: '0.2.0', notes: '新增功能\n修复保存问题', pubDate: '2026-10-29T00:00:00Z'};
 const render = (value: UpdateContextValue) => renderToStaticMarkup(<UpdatePanel update={value}/>);
 
-it('starts opt-in, explains the six-hour tray checks, and never offers an unfinished mirror switch', () => {
+it('starts opt-in with GitHub selected and explains persisted sources and six-hour tray checks', () => {
   const value = model(), html = render(value);
   expect(html).toContain('自动检查更新'); expect(html).toContain('每 6 小时'); expect(html).toContain('托盘运行也生效');
   expect(html).toContain('尚未检查更新'); expect(html).not.toContain('checked=""');
-  expect(html).not.toContain('国内镜像'); expect(html).not.toContain('Gitee');
-  expect(value.check).not.toHaveBeenCalled(); expect(value.setAutoCheck).not.toHaveBeenCalled();
+  expect(html).toContain('<option value="github" selected="">GitHub</option>');
+  expect(html).toContain('<option value="gitee">Gitee 国内镜像</option>');
+  expect(html).toContain('选择会保存在本机'); expect(html).toContain('aria-describedby="update-source-help"');
+  expect(value.check).not.toHaveBeenCalled(); expect(value.setSource).not.toHaveBeenCalled(); expect(value.setAutoCheck).not.toHaveBeenCalled();
+});
+it('shows the native persisted source and its saving state without optimistically changing it', () => {
+  const html = render(model({source: 'gitee'}));
+  expect(html).toContain('<option value="gitee" selected="">Gitee 国内镜像</option>');
+  expect(html).toContain('当前来源：Gitee 国内镜像'); expect(html).not.toContain('GitHub Releases');
+  const saving = render(model({source: 'github'}, {pendingAction: 'set-source'}));
+  expect(saving).toContain('正在保存更新来源…');
+  expect(saving).toMatch(/data-testid="update-source"[^>]*disabled=""/);
+  expect(saving).toContain('<option value="github" selected="">GitHub</option>');
+  for (const view of [{loading: true}, {versionsLoading: true}, {supported: false}]) {
+    expect(render(model({}, view))).toMatch(/data-testid="update-source"[^>]*disabled=""/);
+  }
 });
 it('shows a newer version and release text safely while retaining errors for retry', () => {
   const html = render(model({available: {...available, notes: '<script>unsafe</script>'}, error: '网络连接失败'}));
@@ -32,11 +46,23 @@ it('disables conflicting controls while checking or downloading and supports unk
   const checking = render(model({phase: 'checking'}));
   expect(checking).toContain('data-testid="update-check" disabled=""');
   expect(checking).toContain('data-testid="update-auto-check" disabled=""');
+  expect(checking).toMatch(/data-testid="update-source"[^>]*disabled=""/);
   const unknown = render(model({available, phase: 'downloading', downloadedBytes: 1024}));
   expect(unknown).toContain('aria-label="版本下载进度" max="100"');
-  expect(unknown).not.toContain('value="'); expect(unknown).toContain('1 KiB');
+  expect(unknown).toMatch(/<progress[^>]*max="100"><\/progress>/); expect(unknown).toContain('1 KiB');
   const known = render(model({available, phase: 'downloading', downloadedBytes: 512, totalBytes: 1024}));
   expect(known).toContain('value="50"'); expect(known).toContain('50%');
+});
+it('invalidates installation confirmation after changing source even for the same version', async () => {
+  const value = model({available, phase: 'ready', installation: 'installed'});
+  const original = installConfirmation(value.status)!;
+  value.status = {...value.status, source: 'gitee'};
+  await confirmVersionInstall(value, original);
+  expect(value.install).not.toHaveBeenCalled();
+  const confirmed = installConfirmation(value.status)!;
+  const html = renderToStaticMarkup(<InstallVersionDialog confirmation={confirmed} busy={false} onClose={() => {}} onConfirm={() => {}}/>);
+  expect(html).toContain('更新来源：Gitee 国内镜像');
+  await confirmVersionInstall(value, confirmed); expect(value.install).toHaveBeenCalledWith(false);
 });
 it('requires explicit installed-app confirmation and offers the portable installer separately', () => {
   const ready = {available, phase: 'ready' as const, installerPath: 'D:\\cache\\update.exe'};
@@ -56,7 +82,7 @@ it('offers installation when the installed app has a verified in-memory update w
 });
 it('does not call a failed check latest or enable native actions in browser preview', () => {
   const status = {...initialUpdateStatus(), lastCheckedAt: '2026-10-29T00:00:00Z', error: '连接超时'};
-  expect(updateStatusLabel(status, false)).toBe('更新检查未完成');
+  expect(updateStatusLabel(status, false)).toBe('更新操作未完成');
   const html = render(model({}, {supported: false}));
   expect(html).toContain('data-testid="update-check" disabled=""');
   expect(html).toContain('请在 Perfboard Windows 应用中检查和安装更新');

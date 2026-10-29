@@ -1,6 +1,7 @@
 import {useMemo, useState} from 'react';
 import {Download, ExternalLink, List, RefreshCw} from 'lucide-react';
 import type {UpdateContextValue} from './UpdateContext';
+import {updateSourceLabel} from './updateApi';
 import {compareReleaseVersions, orderedReleaseVersions, releaseVersionLabel} from './releaseVersions';
 
 export function ReleaseVersionPicker({update}: {update: UpdateContextValue}) {
@@ -19,7 +20,7 @@ export function ReleaseVersionPicker({update}: {update: UpdateContextValue}) {
         onClick={() => void update.listVersions()}><RefreshCw size={14}/>
         {versionsLoading ? '正在载入…' : update.versions === null ? '载入版本列表' : '刷新版本列表'}</button></div>
     {update.versions === null && !versionsLoading && <p className="help">手动载入已发布的正式版本，可下载指定版本或选择兼容的旧版本回退。</p>}
-    {versionsLoading && <p className="help" role="status">正在读取 GitHub 正式版本…</p>}
+    {versionsLoading && <p className="help" role="status">正在读取 {updateSourceLabel(status.source)} 正式版本…</p>}
     {update.versions !== null && versions.length === 0 && <p className="help">暂无可下载的正式版本。</p>}
     {selected && <>
       <label className="field release-version-select"><span>下载版本</span><select data-testid="update-version-select" value={selected.tag}

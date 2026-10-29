@@ -5,3 +5,5 @@
 .release-version-selection{margin-top:18px;font-size:13px}
 .release-version-selection .update-notes{margin-bottom:12px}
 .update-confirm-target{font-size:16px;overflow-wrap:anywhere}
+.update-source-select{margin:0;max-width:360px}
+.update-source-select+.help{margin-bottom:18px}

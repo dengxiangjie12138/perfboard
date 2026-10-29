@@ -110,4 +110,58 @@ describe('native update state subscription', () => {
     expect(state.client.getSnapshot().versions).toBeNull();
     expect(state.client.getSnapshot().versionsLoading).toBe(false);
   });
+  it('restores the native source and waits for a saved selection without issuing extra checks', async () => {
+    const state = setup({...initialUpdateStatus(), source: 'gitee'}); await state.client.start();
+    expect(state.client.getSnapshot().status.source).toBe('gitee');
+    const saved = deferred<UpdateStatus>(), check = vi.fn();
+    const task = state.client.perform('set-source', () => saved.promise);
+    expect(state.client.getSnapshot().pendingAction).toBe('set-source');
+    expect(state.client.getSnapshot().status.source).toBe('gitee');
+    await state.client.perform('check', check); expect(check).not.toHaveBeenCalled();
+    saved.resolve(initialUpdateStatus()); await task;
+    expect(state.client.getSnapshot().status.source).toBe('github');
+    expect(state.client.getSnapshot().pendingAction).toBeNull();
+    expect(state.status).toHaveBeenCalledOnce();
+  });
+  it('keeps the last saved source after a write failure and allows a successful retry', async () => {
+    const state = setup({...initialUpdateStatus(), source: 'gitee'}); await state.client.start();
+    await state.client.listVersions(async () => [{tag: 'v0.1.2', version: '0.1.2', notes: null, pubDate: null, installable: true}]);
+    await state.client.perform('set-source', async () => {throw new Error('更新来源保存失败')});
+    expect(state.client.getSnapshot().status.source).toBe('gitee');
+    expect(state.client.getSnapshot().status.error).toBe('更新来源保存失败');
+    expect(state.client.getSnapshot().versions).toHaveLength(1);
+    expect(state.client.getSnapshot().pendingAction).toBeNull();
+    await state.client.perform('set-source', async () => initialUpdateStatus());
+    expect(state.client.getSnapshot().status.source).toBe('github');
+    expect(state.client.getSnapshot().status.error).toBeNull();
+    expect(state.client.getSnapshot().versions).toBeNull();
+    expect(state.client.getSnapshot().versionsError).toBeNull();
+  });
+  it('discards a previous source catalog without letting its completion stop the current source load', async () => {
+    const state = setup(); await state.client.start();
+    const previous = deferred<[]>(), current = deferred<[]>();
+    const oldTask = state.client.listVersions(() => previous.promise);
+    state.emit({...initialUpdateStatus(), source: 'gitee'});
+    expect(state.client.getSnapshot().versionsLoading).toBe(false);
+    const newTask = state.client.listVersions(() => current.promise);
+    previous.resolve([]); await oldTask;
+    expect(state.client.getSnapshot().versionsLoading).toBe(true);
+    expect(state.client.getSnapshot().versions).toBeNull();
+    current.resolve([]); await newTask;
+    expect(state.client.getSnapshot().versionsLoading).toBe(false);
+    expect(state.client.getSnapshot().versions).toEqual([]);
+  });
+  it('ignores previous-source errors even after switching away and back', async () => {
+    const state = setup(); await state.client.start();
+    const catalog = deferred<[]>(), operation = deferred<UpdateStatus>();
+    const catalogTask = state.client.listVersions(() => catalog.promise);
+    const commandTask = state.client.perform('manual', () => operation.promise);
+    state.emit({...initialUpdateStatus(), source: 'gitee'}); state.emit(initialUpdateStatus());
+    catalog.reject(new Error('旧 GitHub 请求超时')); operation.reject(new Error('旧发行页打开失败'));
+    await Promise.all([catalogTask, commandTask]);
+    expect(state.client.getSnapshot().status.error).toBeNull();
+    expect(state.client.getSnapshot().versionsError).toBeNull();
+    expect(state.client.getSnapshot().versions).toBeNull();
+    expect(state.client.getSnapshot().pendingAction).toBeNull();
+  });
 });

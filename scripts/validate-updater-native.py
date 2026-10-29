@@ -72,6 +72,8 @@ def read_plan(filename: Path, signature: Path, private_key: Path | None = None, 
     plan["signature"] = under(signature, root)
     plan.setdefault("initialVersion", "0.1.0")
     plan.setdefault("updateVersion", plan.get("applicationVersion", "0.1.1"))
+    if plan.get("updateSource", "github") not in ("github", "gitee"):
+        raise ValueError("updateSource must be one of the fixed public providers")
     if version_key(plan["initialVersion"]) >= version_key(plan["updateVersion"]):
         raise ValueError("The update fixture version must be newer than its initial version")
     if plan.get("rollbackInstaller"):
@@ -135,6 +137,9 @@ class FixtureServer:
             self.releases[plan["rollbackVersion"]] = {"installer": plan["rollbackInstaller"], "signature": rollback_signature, "schema": None if plan["rollbackVersion"] == "0.1.1" else plan.get("rollbackRepositorySchemaVersion", 6)}
         self.tamper = False
         self.checks = 0
+        self.provider_checks = {"github": 0, "gitee": 0}
+        self.gitee_error = None
+        self.check_delay = 0
         owner = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -143,9 +148,26 @@ class FixtureServer:
 
             def do_GET(self):
                 route = urllib.parse.unquote(self.path.split("?")[0])
-                if route == "/latest.json":
+                if route in ("/latest.json", "/gitee/latest.json"):
                     owner.checks += 1
+                    source = "gitee" if route.startswith("/gitee/") else "github"
+                    owner.provider_checks[source] += 1
+                    if source == "gitee" and owner.gitee_error:
+                        self.send_error(owner.gitee_error)
+                        return
+                    if owner.check_delay:
+                        time.sleep(owner.check_delay)
                     body = json.dumps(owner.manifest(owner.latest_version)).encode()
+                    content_type = "application/json"
+                elif route == "/gitee/versions.json":
+                    body = json.dumps(owner.gitee_catalog()).encode()
+                    content_type = "application/json"
+                elif route.startswith("/gitee/releases/") and route.endswith(".json"):
+                    version = route.rsplit("/", 1)[-1].removeprefix("v").removesuffix(".json")
+                    if version not in owner.releases:
+                        self.send_error(404)
+                        return
+                    body = json.dumps(owner.manifest(version)).encode()
                     content_type = "application/json"
                 elif route == "/releases":
                     body = json.dumps(owner.catalog()).encode()
@@ -200,6 +222,12 @@ class FixtureServer:
             releases.append({"id": index, "tag_name": "v" + version, "name": "Perfboard " + version, "body": "Isolated native release " + version, "draft": False, "prerelease": False, "published_at": "2026-10-29T00:00:00Z", "html_url": f"{self.url}/releases/tag/v{version}", "assets": [{"name": name, "browser_download_url": base + "/" + name, "state": "uploaded"} for name in (filename, filename + ".sig", "latest.json")]})
         releases.append({"id": 1000, "tag_name": "v0.1.0", "name": "Unsigned legacy fixture", "body": "No signed update manifest", "draft": False, "prerelease": False, "published_at": "2026-10-27T00:00:00Z", "html_url": f"{self.url}/releases/tag/v0.1.0", "assets": [{"name": "Perfboard_0.1.0_x64-setup.exe", "browser_download_url": self.url + "/unsigned-not-executable.exe", "state": "uploaded"}]})
         return releases
+
+    def gitee_catalog(self):
+        return [{"tag": release["tag_name"], "version": release["tag_name"].removeprefix("v"),
+                 "notes": release["body"], "pubDate": release["published_at"],
+                 "installable": any(asset["name"] == "latest.json" for asset in release["assets"])}
+                for release in self.catalog()]
 
     def __enter__(self):
         self.thread.start()
@@ -415,6 +443,8 @@ def run(plan, port):
         with FixtureServer(plan, signature, rollback_signature) as server:
             environment["PERFBOARD_TEST_UPDATE_ENDPOINT"] = server.url + "/latest.json"
             environment["PERFBOARD_TEST_RELEASES_ENDPOINT"] = server.url + "/releases"
+            environment["PERFBOARD_TEST_GITEE_UPDATE_ENDPOINT"] = server.url + "/gitee/latest.json"
+            environment["PERFBOARD_TEST_GITEE_INDEX_ENDPOINT"] = server.url + "/gitee/versions.json"
             # /D is an NSIS-specific final unquoted argument, including any spaces.
             command = f'"{plan["initialInstaller"]}" /S /NS /REPOSITORY="{repository}" /D={plan["programDirectory"]}'
             installed = subprocess.run(command, cwd=root, env=environment, timeout=180, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -425,6 +455,24 @@ def run(plan, port):
             main.wait("Boolean(window.__TAURI_INTERNALS__ && document.querySelector('.app-shell'))", 40)
             status = invoke(main, "update_status")
             check("native updater recognizes the registered old installation", status["currentVersion"] == initial_version and status["installation"] == "installed", status)
+            source_validation = plan.get("updateSource") == "gitee"
+            if source_validation:
+                check("an unconfigured update source defaults to GitHub", status["source"] == "github" and not status["autoCheckEnabled"], status)
+                github = invoke(main, "update_check")
+                check("GitHub can discover the fixture before switching providers", github["available"]["version"] == update_version and github["source"] == "github", github)
+                switched = invoke(main, "update_set_source", {"source": "gitee"})
+                check("source switch clears provider-bound discovery hints", switched["source"] == "gitee" and switched["available"] is None and switched["target"] is None and switched["lastCheckedAt"] is None and switched["phase"] == "idle", switched)
+                github_count = server.provider_checks["github"]
+                server.gitee_error = 503
+                failed = invoke(main, "update_check")
+                check("a failed Gitee check stays on Gitee without silent GitHub fallback", failed["source"] == "gitee" and bool(failed["error"]) and server.provider_checks["github"] == github_count, failed)
+                server.gitee_error = None
+                server.check_delay = 1
+                main.evaluate("void window.__TAURI_INTERNALS__.invoke('update_check')")
+                main.wait("window.__TAURI_INTERNALS__.invoke('update_status').then(s=>s.phase==='checking')")
+                check("a provider cannot change while a native check is in flight", rejected(main, "update_set_source", {"source": "github"}))
+                main.wait("window.__TAURI_INTERNALS__.invoke('update_status').then(s=>s.phase==='idle'&&!s.error)")
+                server.check_delay = 0
             if plan.get("previousApplicationSha256"):
                 check("installed old executable matches the prepared test binary", fingerprint(program).lower() == plan["previousApplicationSha256"].lower())
             check("first installation created the synthetic repository", invoke(main, "repo_status")["ready"])
@@ -446,10 +494,15 @@ def run(plan, port):
             main.evaluate("[...document.querySelectorAll('.sidebar button')].find(button=>button.textContent.includes('版本与说明')).click()")
             main.wait("Boolean(document.querySelector('[data-testid=update-check]') && document.querySelector('.nav-update-badge'))")
             check("version page and sidebar show the available update", main.evaluate("document.querySelector('.nav-update-badge').getAttribute('aria-label').includes(" + json.dumps(update_version) + ")"))
+            if source_validation:
+                check("the version page reflects the native Gitee source", main.evaluate("document.querySelector('[data-testid=update-source]').value==='gitee'"))
             invoke(main, "update_set_auto_check", {"enabled": True})
             main.wait("window.__TAURI_INTERNALS__.invoke('update_status').then(s=>s.autoCheckEnabled && s.phase==='idle')")
             stored = json.loads((config / "updater-settings.json").read_text(encoding="utf-8"))
             check("automatic check preference persists outside the repository", stored["autoCheckEnabled"] is True)
+            if source_validation:
+                source_settings = json.loads((config / "updater-source.json").read_text(encoding="utf-8"))
+                check("selected source and its hints persist separately from the legacy preference shape", source_settings["source"] == "gitee" and source_settings["available"]["version"] == update_version and set(stored).issubset({"autoCheckEnabled", "lastCheckedAt", "available"}))
             invoke(main, "app_close_request", {"action": "quit"})
             process.wait(timeout=40)
             main.close()
@@ -461,12 +514,21 @@ def run(plan, port):
             wait_until(lambda: server.checks > count_before, description="automatic startup check while hidden to tray")
             main.wait("window.__TAURI_INTERNALS__.invoke('update_status').then(s=>s.autoCheckEnabled && s.phase==='idle')")
             check("hidden startup performs the enabled automatic check", server.checks > count_before)
+            if source_validation:
+                restarted = invoke(main, "update_status")
+                check("hidden startup retains Gitee and uses its endpoint", restarted["source"] == "gitee" and server.provider_checks["github"] == github_count and server.provider_checks["gitee"] > 0, restarted)
             server.tamper = True
             status = invoke(main, "update_download")
             check("tampered download fails signature verification without installing", status["phase"] == "idle" and bool(status["error"]) and fingerprint(program) == old_hash, status)
             server.tamper = False
             status = invoke(main, "update_download")
             check("valid download is verified and retained by native updater", status["phase"] == "ready" and status["installerPath"] is None, status)
+            if source_validation:
+                cleared = invoke(main, "update_set_source", {"source": "github"})
+                check("switching a ready provider discards its signed target and verified download", cleared["phase"] == "idle" and cleared["target"] is None and cleared["available"] is None and cleared["downloadedBytes"] == 0 and cleared["totalBytes"] is None, cleared)
+                invoke(main, "update_set_source", {"source": "gitee"})
+                status = invoke(main, "update_download")
+                check("Gitee can freshly download again after discarding a different source", status["source"] == "gitee" and status["phase"] == "ready" and not status["error"], status)
             main.evaluate("[...document.querySelectorAll('.sidebar button')].find(button=>button.textContent.includes('版本与说明')).click()")
             main.wait("Boolean(document.querySelector('[data-testid=update-install]'))")
             check("installed ready package exposes the in-app install button", main.evaluate("!document.querySelector('[data-testid=update-install]').disabled"))
@@ -488,6 +550,8 @@ def run(plan, port):
             child = None
             after_status = invoke(main, "update_status")
             check("installed updater exits, upgrades and automatically restarts at " + update_version, after_status["currentVersion"] == update_version and after_status["installation"] == "installed" and fingerprint(program) != old_hash, after_status)
+            if source_validation:
+                check("actual signed Gitee upgrade preserves the selected source", after_status["source"] == "gitee", after_status)
             if plan.get("applicationSha256"):
                 check("upgraded executable matches the prepared new test binary", fingerprint(program).lower() == plan["applicationSha256"].lower())
             check("current-version manifest clears the update badge", after_status["available"] is None and main.evaluate("!document.querySelector('.nav-update-badge')"))

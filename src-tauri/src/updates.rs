@@ -1,5 +1,7 @@
 //! One application-wide updater. Cached release details are display-only.
 mod catalog;
+mod source;
+pub use source::UpdateSource;
 
 use crate::repository::AppResult;
 use chrono::Utc;
@@ -16,8 +18,6 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 const EVENT: &str = "perfboard:update-state";
 const INTERVAL_SECONDS: i64 = 6 * 60 * 60;
-const ENDPOINT: &str =
-    "https://github.com/dengxiangjie12138/perfboard/releases/latest/download/latest.json";
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +30,7 @@ pub struct ReleaseInfo {
 #[serde(rename_all = "camelCase")]
 pub struct UpdateStatus {
     current_version: String,
+    source: UpdateSource,
     auto_check_enabled: bool,
     last_checked_at: Option<String>,
     available: Option<ReleaseInfo>,
@@ -49,9 +50,20 @@ struct Preferences {
     last_checked_at: Option<String>,
     available: Option<ReleaseInfo>,
 }
+// Keep the pre-0.1.3 settings schema intact: old binaries reject unknown fields.
+// This atomic record also binds cached discovery hints to their selected source.
+#[derive(Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SourceSettings {
+    #[serde(default)]
+    source: UpdateSource,
+    last_checked_at: Option<String>,
+    available: Option<ReleaseInfo>,
+}
 struct Runtime {
     status: UpdateStatus,
     preferences: Preferences,
+    source_settings: SourceSettings,
     load_error: Option<String>,
     next_check: i64,
     update: Option<Update>,
@@ -75,13 +87,16 @@ fn newer(version: &str, current: &str) -> bool {
     }
 }
 fn save_preferences(directory: &Path, preferences: &Preferences) -> AppResult<()> {
+    save_settings(directory, "updater-settings.json", preferences)
+}
+fn save_settings<T: Serialize>(directory: &Path, filename: &str, settings: &T) -> AppResult<()> {
     fs::create_dir_all(directory).map_err(|e| format!("无法建立更新设置目录：{e}"))?;
     let mut file = tempfile::NamedTempFile::new_in(directory).map_err(|e| e.to_string())?;
-    serde_json::to_writer_pretty(&mut file, preferences).map_err(|e| e.to_string())?;
+    serde_json::to_writer_pretty(&mut file, settings).map_err(|e| e.to_string())?;
     file.flush()
         .and_then(|_| file.as_file().sync_all())
         .map_err(|e| e.to_string())?;
-    file.persist(directory.join("updater-settings.json"))
+    file.persist(directory.join(filename))
         .map_err(|e| format!("更新设置未保存：{e}"))?;
     Ok(())
 }
@@ -92,19 +107,38 @@ impl UpdateService {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Preferences::default()),
             Err(e) => Err(e.to_string()),
         };
-        let load_error = loaded
+        let legacy_error = loaded
             .as_ref()
             .err()
             .map(|e| format!("无法读取更新设置，原文件已保留：{e}"));
-        let mut preferences = loaded.unwrap_or_default();
-        preferences.available = preferences
+        let preferences = loaded.unwrap_or_default();
+        let source_loaded = match fs::read(directory.join("updater-source.json")) {
+            Ok(bytes) => {
+                serde_json::from_slice::<SourceSettings>(&bytes).map_err(|e| e.to_string())
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(SourceSettings {
+                source: UpdateSource::Github,
+                last_checked_at: preferences.last_checked_at.clone(),
+                available: preferences.available.clone(),
+            }),
+            Err(e) => Err(e.to_string()),
+        };
+        let load_error = legacy_error.or_else(|| {
+            source_loaded
+                .as_ref()
+                .err()
+                .map(|e| format!("无法读取更新来源设置，原文件已保留：{e}"))
+        });
+        let mut source_settings = source_loaded.unwrap_or_default();
+        source_settings.available = source_settings
             .available
             .filter(|info| newer(&info.version, &version));
         let status = UpdateStatus {
             current_version: version,
+            source: source_settings.source,
             auto_check_enabled: preferences.auto_check_enabled,
-            last_checked_at: preferences.last_checked_at.clone(),
-            available: preferences.available.clone(),
+            last_checked_at: source_settings.last_checked_at.clone(),
+            available: source_settings.available.clone(),
             target: None,
             phase: "idle",
             downloaded_bytes: 0,
@@ -118,6 +152,7 @@ impl UpdateService {
             runtime: Mutex::new(Runtime {
                 status,
                 preferences,
+                source_settings,
                 load_error,
                 next_check: 0,
                 update: None,
@@ -187,6 +222,60 @@ impl UpdateService {
         runtime.status.error = Some(message);
         Ok(())
     }
+    fn switch_source(&self, source: UpdateSource) -> AppResult<()> {
+        let mut runtime = self.lock()?;
+        if runtime.status.source == source {
+            return Ok(());
+        }
+        if matches!(
+            runtime.status.phase,
+            "checking" | "downloading" | "installing"
+        ) {
+            return Err("更新任务进行中，请完成后再切换更新来源".into());
+        }
+        if let Some(error) = &runtime.load_error {
+            return Err(error.clone());
+        }
+        let settings = SourceSettings {
+            source,
+            ..SourceSettings::default()
+        };
+        // Persist before changing native-owned state. A failed write leaves the
+        // old provider and any verified package usable together.
+        save_settings(&self.directory, "updater-source.json", &settings)?;
+        runtime.source_settings = settings;
+        runtime.status.source = source;
+        runtime.status.available = None;
+        runtime.status.last_checked_at = None;
+        runtime.status.target = None;
+        runtime.status.error = None;
+        runtime.status.phase = "idle";
+        runtime.next_check = 0;
+        runtime.update = None;
+        runtime.explicit_selection = false;
+        clear_package(&mut runtime);
+        Ok(())
+    }
+    fn save_cache(
+        &self,
+        runtime: &mut Runtime,
+        available: Option<ReleaseInfo>,
+        checked: String,
+    ) -> AppResult<()> {
+        if let Some(error) = &runtime.load_error {
+            return Err(error.clone());
+        }
+        let settings = SourceSettings {
+            source: runtime.status.source,
+            last_checked_at: Some(checked),
+            available,
+        };
+        save_settings(&self.directory, "updater-source.json", &settings)?;
+        runtime.status.last_checked_at = settings.last_checked_at.clone();
+        runtime.status.available = settings.available.clone();
+        runtime.source_settings = settings;
+        Ok(())
+    }
 }
 
 pub fn initialize(app: &tauri::AppHandle) -> AppResult<()> {
@@ -211,13 +300,15 @@ pub fn initialize(app: &tauri::AppHandle) -> AppResult<()> {
     Ok(())
 }
 
-fn builder(app: &tauri::AppHandle, timeout: Duration) -> AppResult<tauri_plugin_updater::Updater> {
-    let endpoint = ENDPOINT.to_string();
-    #[cfg(debug_assertions)]
-    let endpoint = std::env::var("PERFBOARD_TEST_UPDATE_ENDPOINT").unwrap_or(endpoint);
+fn builder(
+    app: &tauri::AppHandle,
+    source: UpdateSource,
+    timeout: Duration,
+) -> AppResult<tauri_plugin_updater::Updater> {
     app.updater_builder()
-        .endpoints(vec![endpoint.parse().map_err(|_| "更新地址无效")?])
+        .endpoints(vec![source.latest()?])
         .map_err(|e| e.to_string())?
+        .configure_client(move |client| source.configure_client(client, timeout))
         .timeout(timeout)
         .build()
         .map_err(|e| e.to_string())
@@ -225,6 +316,7 @@ fn builder(app: &tauri::AppHandle, timeout: Duration) -> AppResult<tauri_plugin_
 
 fn selected_builder(
     app: &tauri::AppHandle,
+    source: UpdateSource,
     endpoint: String,
     selected: semver::Version,
     timeout: Duration,
@@ -239,6 +331,7 @@ fn selected_builder(
         .version_comparator(move |current, release| {
             release.version == selected && release.version != current
         })
+        .configure_client(move |client| source.configure_client(client, timeout))
         .timeout(timeout)
         .build()
         .map_err(|e| e.to_string())
@@ -249,26 +342,21 @@ async fn check(app: &tauri::AppHandle, automatic: bool) -> AppResult<UpdateStatu
         return service.publish(app);
     }
     service.publish(app)?;
+    let source = service.lock()?.status.source;
     let result = async {
-        let update = builder(app, Duration::from_secs(30))?
+        let update = builder(app, source, Duration::from_secs(30))?
             .check()
             .await
             .map_err(|e| format!("检查更新失败，请检查网络后重试：{e}"))?;
+        if let Some(update) = &update {
+            validate_update_source(source, None, update)?;
+        }
         let mut runtime = service.lock()?;
         let update =
             update.filter(|update| newer(&update.version, &runtime.status.current_version));
         let available = update.as_ref().map(release_info);
-        let mut preferences = runtime.preferences.clone();
-        preferences.last_checked_at = Some(Utc::now().to_rfc3339());
-        preferences.available = available.clone();
-        runtime.status.last_checked_at = preferences.last_checked_at.clone();
-        runtime.status.available = available;
+        service.save_cache(&mut runtime, available, Utc::now().to_rfc3339())?;
         apply_latest_result(&mut runtime, update);
-        if let Some(error) = &runtime.load_error {
-            return Err(error.clone());
-        }
-        save_preferences(&service.directory, &preferences)?;
-        runtime.preferences = preferences;
         Ok(())
     }
     .await;
@@ -405,6 +493,19 @@ fn release_info(update: &Update) -> ReleaseInfo {
             .map(|date| date.to_rfc3339()),
     }
 }
+fn validate_update_source(
+    source: UpdateSource,
+    tag: Option<&str>,
+    update: &Update,
+) -> AppResult<()> {
+    let version = catalog::stable_tag(&update.version)?;
+    let canonical = format!("v{version}");
+    source.installer(
+        tag.unwrap_or(&canonical),
+        &version.to_string(),
+        update.download_url.as_str(),
+    )
+}
 
 #[tauri::command]
 pub fn update_status(
@@ -413,6 +514,17 @@ pub fn update_status(
 ) -> AppResult<UpdateStatus> {
     crate::tool_windows::require_main(&window)?;
     Ok(app.state::<UpdateService>().lock()?.status.clone())
+}
+#[tauri::command]
+pub fn update_set_source(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    source: UpdateSource,
+) -> AppResult<UpdateStatus> {
+    crate::tool_windows::require_main(&window)?;
+    let service = app.state::<UpdateService>();
+    service.switch_source(source)?;
+    service.publish(&app)
 }
 #[tauri::command]
 pub fn update_set_auto_check(
@@ -463,10 +575,12 @@ pub async fn update_download(
 
 #[tauri::command]
 pub async fn update_list_versions(
+    app: tauri::AppHandle,
     window: tauri::WebviewWindow,
 ) -> AppResult<Vec<catalog::ReleaseVersion>> {
     crate::tool_windows::require_main(&window)?;
-    catalog::list().await
+    let source = app.state::<UpdateService>().lock()?.status.source;
+    catalog::list(source).await
 }
 
 #[tauri::command]
@@ -481,12 +595,16 @@ pub async fn update_download_version(
 }
 
 #[tauri::command]
-pub async fn update_open_release(window: tauri::WebviewWindow, tag: String) -> AppResult<()> {
+pub async fn update_open_release(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    tag: String,
+) -> AppResult<()> {
     crate::tool_windows::require_main(&window)?;
-    let release = catalog::get(&tag).await?;
+    let source = app.state::<UpdateService>().lock()?.status.source;
+    catalog::exists(source, &tag).await?;
     // Accept a tag, never an arbitrary WebView-provided executable or URL.
-    let _ = catalog::stable_tag(&release.tag_name)?;
-    open::that(catalog::page(&tag)?).map_err(|e| format!("无法打开 GitHub 版本页面：{e}"))
+    open::that(source.page(&tag)?).map_err(|e| format!("无法打开 {} 版本页面：{e}", source.name()))
 }
 
 async fn download(app: &tauri::AppHandle, tag: Option<&str>) -> AppResult<UpdateStatus> {
@@ -495,37 +613,38 @@ async fn download(app: &tauri::AppHandle, tag: Option<&str>) -> AppResult<Update
         return service.publish(&app);
     }
     service.publish(&app)?;
+    let source = service.lock()?.status.source;
     let result = async {
         // Never install from cached display metadata. Re-resolve through the trusted endpoint.
         let update = if let Some(tag) = tag {
-            let release = catalog::get(tag).await?;
-            let (endpoint, version) = catalog::manifest(&release)?;
+            let (endpoint, version) = catalog::resolve(source, tag).await?;
             if version == app.package_info().version {
                 return Err("当前已是该版本，请选择其他版本".into());
             }
-            let update =
-                selected_builder(app, endpoint, version.clone(), Duration::from_secs(20 * 60))?
-                    .check()
-                    .await
-                    .map_err(|e| format!("无法读取所选版本的签名更新清单：{e}"))?
-                    .ok_or("所选版本与其更新清单不符，请刷新版本列表")?;
-            catalog::asset_url(
-                tag,
-                &format!("Perfboard_{version}_x64-setup.exe"),
-                update.download_url.as_str(),
-            )?;
+            let update = selected_builder(
+                app,
+                source,
+                endpoint,
+                version.clone(),
+                Duration::from_secs(20 * 60),
+            )?
+            .check()
+            .await
+            .map_err(|e| format!("无法读取所选版本的签名更新清单：{e}"))?
+            .ok_or("所选版本与其更新清单不符，请刷新版本列表")?;
             if is_rollback(&update.version, &app.package_info().version.to_string())? {
                 target_schema(&update.version, &update.raw_json)?;
             }
             update
         } else {
-            builder(app, Duration::from_secs(20 * 60))?
+            builder(app, source, Duration::from_secs(20 * 60))?
                 .check()
                 .await
                 .map_err(|e| e.to_string())?
                 .filter(|update| newer(&update.version, &app.package_info().version.to_string()))
                 .ok_or("当前没有可下载的新版本，请重新检查更新")?
         };
+        validate_update_source(source, tag, &update)?;
         {
             let mut runtime = service.lock()?;
             runtime.explicit_selection = tag.is_some();
@@ -533,17 +652,12 @@ async fn download(app: &tauri::AppHandle, tag: Option<&str>) -> AppResult<Update
             clear_package(&mut runtime);
             runtime.update = None;
             if tag.is_none() {
-                runtime.status.available = Some(release_info(&update));
-                runtime.status.last_checked_at = Some(Utc::now().to_rfc3339());
-                let mut preferences = runtime.preferences.clone();
-                preferences.available = runtime.status.available.clone();
-                preferences.last_checked_at = runtime.status.last_checked_at.clone();
-                if let Some(error) = &runtime.load_error {
-                    runtime.status.error = Some(error.clone());
-                } else if let Err(error) = save_preferences(&service.directory, &preferences) {
+                if let Err(error) = service.save_cache(
+                    &mut runtime,
+                    Some(release_info(&update)),
+                    Utc::now().to_rfc3339(),
+                ) {
                     runtime.status.error = Some(error);
-                } else {
-                    runtime.preferences = preferences;
                 }
             }
         }
@@ -828,9 +942,133 @@ mod tests {
         assert!(runtime.status.target.is_none());
         assert!(!runtime.explicit_selection);
         assert_eq!(runtime.next_check, 0);
+        assert_eq!(runtime.status.source, UpdateSource::Github);
         drop(runtime);
         let updated = UpdateService::load(directory.path().into(), "0.2.0".into(), true);
         assert!(updated.lock().unwrap().status.available.is_none());
+    }
+    #[test]
+    fn source_and_its_display_cache_survive_restart_without_changing_legacy_settings() {
+        let directory = tempfile::tempdir().unwrap();
+        let legacy = Preferences {
+            auto_check_enabled: true,
+            last_checked_at: Some("2026-10-28T00:00:00Z".into()),
+            available: Some(ReleaseInfo {
+                version: "0.1.4".into(),
+                notes: Some("GitHub hint".into()),
+                pub_date: None,
+            }),
+        };
+        save_preferences(directory.path(), &legacy).unwrap();
+        let path = directory.path().join("updater-settings.json");
+        let original = fs::read(&path).unwrap();
+        let service = UpdateService::load(directory.path().into(), "0.1.2".into(), false);
+        service.switch_source(UpdateSource::Gitee).unwrap();
+        {
+            let mut runtime = service.lock().unwrap();
+            assert!(runtime.status.available.is_none());
+            assert!(runtime.status.last_checked_at.is_none());
+            assert!(runtime.status.auto_check_enabled);
+            service
+                .save_cache(
+                    &mut runtime,
+                    Some(ReleaseInfo {
+                        version: "0.1.3".into(),
+                        notes: Some("Gitee hint".into()),
+                        pub_date: None,
+                    }),
+                    "2026-10-30T00:00:00Z".into(),
+                )
+                .unwrap();
+        }
+        let reloaded = UpdateService::load(directory.path().into(), "0.1.2".into(), false);
+        let runtime = reloaded.lock().unwrap();
+        assert_eq!(runtime.status.source, UpdateSource::Gitee);
+        assert_eq!(runtime.status.available.as_ref().unwrap().version, "0.1.3");
+        assert_eq!(
+            runtime.status.last_checked_at.as_deref(),
+            Some("2026-10-30T00:00:00Z")
+        );
+        assert!(runtime.package.is_none());
+        assert!(runtime.update.is_none());
+        assert!(runtime.status.target.is_none());
+        assert_eq!(fs::read(&path).unwrap(), original);
+        // This is the exact deny_unknown_fields schema read by 0.1.2.
+        assert!(serde_json::from_slice::<Preferences>(&fs::read(path).unwrap()).is_ok());
+        drop(runtime);
+        reloaded.switch_source(UpdateSource::Github).unwrap();
+        let clean = UpdateService::load(directory.path().into(), "0.1.2".into(), false);
+        assert_eq!(clean.lock().unwrap().status.source, UpdateSource::Github);
+        assert!(clean.lock().unwrap().status.available.is_none());
+        assert!(clean.lock().unwrap().status.last_checked_at.is_none());
+    }
+
+    #[test]
+    fn source_switch_clears_ready_owned_bytes_but_cannot_race_active_work() {
+        let directory = tempfile::tempdir().unwrap();
+        let service = UpdateService::load(directory.path().into(), "0.1.2".into(), false);
+        for phase in ["checking", "downloading", "installing"] {
+            service.lock().unwrap().status.phase = phase;
+            assert!(service.switch_source(UpdateSource::Gitee).is_err());
+            assert_eq!(service.lock().unwrap().status.source, UpdateSource::Github);
+            assert!(!directory.path().join("updater-source.json").exists());
+        }
+        let folder = tempfile::tempdir().unwrap();
+        let old_path = folder.path().join("package.exe");
+        fs::write(&old_path, [1, 2, 3]).unwrap();
+        {
+            let mut runtime = service.lock().unwrap();
+            runtime.package = Some(vec![1, 2, 3]);
+            runtime.installer = Some(old_path.clone());
+            runtime.download_directory = Some(folder);
+            runtime.explicit_selection = true;
+            runtime.status.phase = "ready";
+            runtime.status.installer_path = Some(old_path.to_string_lossy().into());
+            runtime.status.target = Some(ReleaseInfo {
+                version: "0.1.1".into(),
+                notes: None,
+                pub_date: None,
+            });
+            runtime.status.downloaded_bytes = 3;
+            runtime.status.total_bytes = Some(3);
+        }
+        service.switch_source(UpdateSource::Gitee).unwrap();
+        let runtime = service.lock().unwrap();
+        assert_eq!(runtime.status.phase, "idle");
+        assert!(runtime.package.is_none());
+        assert!(runtime.update.is_none());
+        assert!(runtime.installer.is_none());
+        assert!(runtime.download_directory.is_none());
+        assert!(!runtime.explicit_selection);
+        assert!(runtime.status.target.is_none());
+        assert!(runtime.status.installer_path.is_none());
+        assert_eq!(runtime.status.downloaded_bytes, 0);
+        assert!(runtime.status.total_bytes.is_none());
+        assert_eq!(runtime.next_check, 0);
+        assert!(!old_path.exists());
+    }
+
+    #[test]
+    fn corrupt_source_file_is_preserved_and_cannot_be_overwritten_by_a_switch() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("updater-source.json");
+        fs::write(
+            &path,
+            r#"{"source":"third-party","lastCheckedAt":null,"available":null}"#,
+        )
+        .unwrap();
+        let original = fs::read(&path).unwrap();
+        let service = UpdateService::load(directory.path().into(), "0.1.2".into(), false);
+        assert!(service
+            .lock()
+            .unwrap()
+            .status
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("更新来源设置"));
+        assert!(service.switch_source(UpdateSource::Gitee).is_err());
+        assert_eq!(fs::read(path).unwrap(), original);
     }
     #[test]
     fn corrupt_configuration_is_preserved_and_not_silently_reset() {

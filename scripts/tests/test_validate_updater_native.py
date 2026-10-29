@@ -63,6 +63,13 @@ class UpdaterNativePlanTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'test product'):
             self.read()
 
+    def test_only_fixed_providers_are_accepted(self):
+        self.plan['updateSource'] = 'gitee'
+        self.assertEqual(self.read()['updateSource'], 'gitee')
+        self.plan['updateSource'] = 'https://example.com'
+        with self.assertRaisesRegex(ValueError, 'fixed public providers'):
+            self.read()
+
     def test_rollback_to_unsigned_legacy_version_is_rejected(self):
         self.rollback()
         self.plan['rollbackVersion'] = '0.1.0'
@@ -99,6 +106,11 @@ class UpdaterNativePlanTests(unittest.TestCase):
         self.assertEqual(len(catalog[1]['assets']), 3)
         self.assertEqual(len(catalog[-1]['assets']), 1)
         self.assertNotIn('latest.json', [asset['name'] for asset in catalog[-1]['assets']])
+        gitee = fixture.gitee_catalog()
+        self.assertEqual([item['version'] for item in gitee], ['0.1.2', '0.1.1', '0.1.0'])
+        self.assertTrue(gitee[0]['installable'])
+        self.assertFalse(gitee[-1]['installable'])
+        self.assertEqual(gitee[0]['tag'], 'v0.1.2')
 
 
 if __name__ == '__main__':

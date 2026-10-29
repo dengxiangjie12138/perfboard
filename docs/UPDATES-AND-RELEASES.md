@@ -1,6 +1,6 @@
-# 软件更新与 GitHub 发布
+# 软件更新与发布
 
-洞洞板使用 GitHub Releases 分发 Windows x64 NSIS 安装包。软件中的“自动检查更新”默认关闭；开启后启动时检查一次，运行期间每 6 小时检查，隐藏到托盘仍然生效。自动检查只提醒，下载和安装由用户主动操作。Gitee 镜像后续再接入。
+洞洞板使用 GitHub Releases 分发 Windows x64 NSIS 安装包。软件中的“自动检查更新”默认关闭；开启后启动时检查一次，运行期间每 6 小时检查，隐藏到托盘仍然生效。自动检查只提醒，下载和安装由用户主动操作。从 `0.1.3` 起可在“更新来源”选择 GitHub 或 Gitee 国内镜像，默认 GitHub，选择独立保存在本机配置中。检查、历史版本与下载统一使用所选来源，切换时清除原来源的缓存提示与下载状态；检查、下载或安装时不能切换。
 
 ## 用户更新流程
 
@@ -29,13 +29,15 @@ npm run tauri -- signer generate -w $updaterKeyPath
 
 ## 构建和签名
 
-发布前统一修改 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 中的版本。三个版本必须一致，例如下一版均为 `0.1.2`；发布标签使用 `v0.1.2`。
+发布前统一修改 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 中的版本。三个版本必须一致，例如本版均为 `0.1.3`；发布标签使用 `v0.1.3`。
 
-应用配置启用 `bundle.createUpdaterArtifacts: true`、`plugins.updater.requireSignedVersion: true`，固定更新入口为：
+应用配置启用 `bundle.createUpdaterArtifacts: true`、`plugins.updater.requireSignedVersion: true`，默认 GitHub 更新入口为：
 
 ```text
 https://github.com/dengxiangjie12138/perfboard/releases/latest/download/latest.json
 ```
+
+Gitee 使用固定 `gitee-updates` 分支中的 `latest.json`、`versions.json` 和 `releases/v<版本>.json`，不依赖 Gitee 按更新时间排列的“最新发行版”。具体镜像发布与验证见 [Gitee 同步说明](GITEE-MIRROR.md)。更新包只接受当前来源认可的 HTTPS 下载主机和重定向，签名及签名版本校验对两个来源均生效。来源与该来源的提示缓存保存在独立 `updater-source.json`；保留旧 `updater-settings.json` 格式，兼容回退到 0.1.2。
 
 在当前 PowerShell 进程中设置构建环境变量。不要把私钥内容直接写在命令历史里，也不要输出或打印变量：
 
@@ -51,7 +53,7 @@ Remove-Item Env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD -ErrorAction SilentlyContinue
 构建会生成 `Perfboard_<版本>_x64-setup.exe` 与同名 `.exe.sig`。本项目锁定的 Tauri CLI 2.12.1 支持签名绑定应用版本，`tauri build` 自动绑定；若单独对安装包补签名，必须传 `--app-version <版本>`：
 
 ```powershell
-npm run tauri -- signer sign --private-key-path $updaterKeyPath --app-version 0.1.2 'src-tauri\target\release\bundle\nsis\Perfboard_0.1.2_x64-setup.exe'
+npm run tauri -- signer sign --private-key-path $updaterKeyPath --app-version 0.1.3 'src-tauri\target\release\bundle\nsis\Perfboard_0.1.3_x64-setup.exe'
 ```
 
 `requireSignedVersion` 使下载包的签名版本必须与更新信息中的版本相同，避免旧包被配上较新版本号。不得为绕过失败而关闭签名或版本验证。命令参数可通过 `npm run tauri -- signer sign --help` 核对；参见 [Tauri CLI](https://v2.tauri.app/reference/cli/#signer-sign)。
@@ -62,9 +64,9 @@ npm run tauri -- signer sign --private-key-path $updaterKeyPath --app-version 0.
 
 ```powershell
 node scripts/prepare-update-release.mjs `
-  --installer 'src-tauri\target\release\bundle\nsis\Perfboard_0.1.2_x64-setup.exe' `
-  --notes 'docs\releases\v0.1.2.md' `
-  --output 'deliverables\releases\v0.1.2'
+  --installer 'src-tauri\target\release\bundle\nsis\Perfboard_0.1.3_x64-setup.exe' `
+  --notes 'docs\releases\v0.1.3.md' `
+  --output 'deliverables\releases\v0.1.3'
 ```
 
 脚本使用 Node 内置加密库，不需要安装依赖，也不会读取私钥或上传文件。它会：
@@ -117,3 +119,9 @@ python scripts/validate-updater-native.py `
 脚本创建合成物料、笔记和附件，验证手动检查、侧栏标记、自动开关和隐藏托盘启动检查、篡改包拒绝、有效包下载、独立笔记窗口拒绝保存阻止安装、随后正常保存并升级和自动重启。最后比较核心记录、附件、仓库路径配置，退出并卸载 GUID 测试产品，清理其精确注册项，保留合成数据、截图和 JSON 报告。故障注入只包装该测试 WebView 的调试回调表，使真实保存屏障收到 `saved=false`，不修改应用代码或绕过验签。
 
 带回退参数时，还会验证历史列表、无签名旧版不可执行、schema 不兼容拒绝安装、缺少明确回退确认时不执行，以及回退后旧版能继续读取原更新偏好和数据。`0.1.1` 测试清单故意省略 schema 字段，覆盖旧版兼容分支。整个流程仅操作 GUID 测试产品，不能替换或退出用户正式安装。
+
+## 0.1.3 来源选择验证
+
+前端回归 849 项通过（另有 1 项既有跳过），Rust 回归 306 项通过（另有 2 项既有忽略），其中更新模块 26 项。代码检查与发布签名工具 15 项测试通过。界面验证覆盖明暗主题、440px 窄窗口、保存失败重试、切换来源时丢弃旧请求，以及来源绑定的安装确认。
+
+使用独立 GUID 产品、临时测试签名、隔离配置和合成仓库完成 42 项 Windows 原生验收：默认 GitHub、Gitee 来源保存和重启恢复、后台检查、网络失败重试、签名拒绝、独立窗口保存失败阻止退出、NSIS 升级及回退、数据库和附件以及仓库指针保留。两个测试二进制均来自 0.1.3 功能源码，通过构建配置分别标为 0.1.2、0.1.3，用于验证安装与回退流程；真实旧版配置兼容性由旧设置格式和字节保持测试保证，不将测试程序视为实际已发布 0.1.2 二进制。正式用户安装与个人数据库不用于安装验收。

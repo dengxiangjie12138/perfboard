@@ -10,7 +10,7 @@ const versions = [release('0.1.0', false), release('0.1.2'), release('0.1.1')];
 function model(status: Partial<UpdateStatus> = {}, view: Partial<UpdateContextValue> = {}): UpdateContextValue {
   return {status: {...initialUpdateStatus(), currentVersion: '0.1.2', ...status}, supported: true, loading: false, pendingAction: null,
     versions: null, versionsLoading: false, versionsError: null, listVersions: vi.fn(), downloadVersion: vi.fn(), openRelease: vi.fn(),
-    check: vi.fn(), setAutoCheck: vi.fn(), download: vi.fn(), install: vi.fn(), openInstaller: vi.fn(), ...view};
+    check: vi.fn(), setSource: vi.fn(), setAutoCheck: vi.fn(), download: vi.fn(), install: vi.fn(), openInstaller: vi.fn(), ...view};
 }
 const render = (update: UpdateContextValue) => renderToStaticMarkup(<ReleaseVersionPicker update={update}/>);
 
@@ -18,6 +18,11 @@ it('only offers a load action on first open and never fetches or downloads on re
   const update = model(), html = render(update);
   expect(html).toContain('载入版本列表'); expect(html).not.toContain('data-testid="update-version-select"');
   expect(update.listVersions).not.toHaveBeenCalled(); expect(update.downloadVersion).not.toHaveBeenCalled();
+});
+it('names the selected source while loading its version catalog', () => {
+  const html = render(model({source: 'gitee'}, {versionsLoading: true}));
+  expect(html).toContain('正在读取 Gitee 国内镜像 正式版本…');
+  expect(html).not.toContain('正在读取 GitHub');
 });
 it('lists stable versions in descending order with current/latest/rollback labels', () => {
   const html = render(model({}, {versions}));

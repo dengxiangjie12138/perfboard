@@ -1,7 +1,7 @@
 import {initialUpdateStatus, type ReleaseVersion, type UpdateStatus} from './updateApi';
 import {orderedReleaseVersions} from './releaseVersions';
 
-export type UpdateAction = 'check' | 'set-auto' | 'download' | 'install' | 'open' | 'manual';
+export type UpdateAction = 'check' | 'set-source' | 'set-auto' | 'download' | 'install' | 'open' | 'manual';
 export interface UpdateSnapshot {
   status: UpdateStatus;
   supported: boolean;
@@ -23,6 +23,8 @@ export class UpdateClient {
   private listeners = new Set<() => void>();
   private generation = 0;
   private revision = 0;
+  private sourceRevision = 0;
+  private catalogRequest = 0;
   private active = false;
   private unlisten: (() => void) | undefined;
   constructor(private readonly transport: UpdateTransport, supported: boolean) {
@@ -39,8 +41,13 @@ export class UpdateClient {
     this.listeners.forEach(listener => listener());
   }
   private adopt(status: UpdateStatus, loading = this.snapshot.loading): void {
+    const sourceChanged = status.source !== this.snapshot.status.source;
     ++this.revision;
-    this.publish({status, loading});
+    if (sourceChanged) {
+      ++this.sourceRevision;
+      ++this.catalogRequest;
+    }
+    this.publish({status, loading, ...(sourceChanged ? {versions: null, versionsLoading: false, versionsError: null} : {})});
   }
   async start(): Promise<void> {
     if (!this.snapshot.supported || this.active) return;
@@ -75,26 +82,27 @@ export class UpdateClient {
   }
   async listVersions(operation: () => Promise<ReleaseVersion[]>): Promise<void> {
     if (!this.active || !this.snapshot.supported || this.snapshot.versionsLoading) return;
-    const generation = this.generation;
+    const generation = this.generation, request = ++this.catalogRequest;
+    const isCurrent = () => this.active && this.generation === generation && this.catalogRequest === request;
     this.publish({versionsLoading: true, versionsError: null});
     try {
       const versions = await operation();
-      if (this.active && this.generation === generation) this.publish({versions: orderedReleaseVersions(versions)});
+      if (isCurrent()) this.publish({versions: orderedReleaseVersions(versions)});
     } catch (error) {
-      if (this.active && this.generation === generation) this.publish({versionsError: failureText(error)});
+      if (isCurrent()) this.publish({versionsError: failureText(error)});
     } finally {
-      if (this.active && this.generation === generation) this.publish({versionsLoading: false});
+      if (isCurrent()) this.publish({versionsLoading: false});
     }
   }
   async perform(action: UpdateAction, operation: () => Promise<UpdateStatus | void>): Promise<void> {
     if (!this.active || !this.snapshot.supported || this.snapshot.loading || this.snapshot.pendingAction) return;
-    const generation = this.generation, revision = this.revision;
+    const generation = this.generation, revision = this.revision, sourceRevision = this.sourceRevision;
     this.publish({pendingAction: action});
     try {
       const status = await operation();
       if (status && this.active && this.generation === generation && this.revision === revision) this.adopt(status);
     } catch (error) {
-      if (this.active && this.generation === generation) {
+      if (this.active && this.generation === generation && this.sourceRevision === sourceRevision) {
         this.adopt({...this.snapshot.status, error: failureText(error)});
       }
     } finally {

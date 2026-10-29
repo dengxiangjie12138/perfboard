@@ -1,11 +1,12 @@
 import {createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode} from 'react';
 import {listen} from '@tauri-apps/api/event';
 import {native} from '../../services/api';
-import {initialUpdateStatus, updateApi, type UpdateStatus} from './updateApi';
+import {initialUpdateStatus, updateApi, type UpdateSource, type UpdateStatus} from './updateApi';
 import {UpdateClient, type UpdateSnapshot} from './updateClient';
 
 export interface UpdateContextValue extends UpdateSnapshot {
   check: () => Promise<void>;
+  setSource: (source: UpdateSource) => Promise<void>;
   setAutoCheck: (enabled: boolean) => Promise<void>;
   download: () => Promise<void>;
   install: (allowRollback?: boolean) => Promise<void>;
@@ -17,7 +18,7 @@ export interface UpdateContextValue extends UpdateSnapshot {
 const noop = async () => {};
 const Context = createContext<UpdateContextValue>({status: initialUpdateStatus(), supported: false,
   loading: false, pendingAction: null, versions: null, versionsLoading: false, versionsError: null,
-  check: noop, setAutoCheck: noop, download: noop, install: noop, openInstaller: noop,
+  check: noop, setSource: noop, setAutoCheck: noop, download: noop, install: noop, openInstaller: noop,
   listVersions: noop, downloadVersion: noop, openRelease: noop});
 
 export function UpdateProvider({children}: {children: ReactNode}) {
@@ -28,6 +29,7 @@ export function UpdateProvider({children}: {children: ReactNode}) {
   useEffect(() => {void client.start(); return () => client.stop()}, [client]);
   const actions = useMemo(() => ({
     check: () => client.perform('check', updateApi.check),
+    setSource: (source: UpdateSource) => client.perform('set-source', () => updateApi.setSource(source)),
     setAutoCheck: (enabled: boolean) => client.perform('set-auto', () => updateApi.setAutoCheck(enabled)),
     download: () => client.perform('download', updateApi.download),
     install: (allowRollback = false) => client.perform('install', () => updateApi.install(allowRollback)),

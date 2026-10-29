@@ -3,7 +3,7 @@ import {ArrowUpCircle, Download, RefreshCw} from 'lucide-react';
 import {Modal} from '../../components/Common';
 import {formatBytes} from '../settings/settingsApi';
 import type {UpdateContextValue} from './UpdateContext';
-import type {UpdateStatus} from './updateApi';
+import {updateSourceLabel, type UpdateSource, type UpdateStatus} from './updateApi';
 import {ReleaseVersionPicker} from './ReleaseVersionPicker';
 import {compareReleaseVersions, installConfirmation, type InstallConfirmation} from './releaseVersions';
 import './updates.css';
@@ -15,7 +15,7 @@ export function updateStatusLabel(status: UpdateStatus, loading: boolean): strin
   if (status.phase === 'installing') return '正在保存并准备安装…';
   if (status.phase === 'ready') return '安装包已下载并通过验证';
   if (status.available) return '发现新版本 ' + status.available.version;
-  if (status.error) return '更新检查未完成';
+  if (status.error) return '更新操作未完成';
   return status.lastCheckedAt ? '已是最新版本' : '尚未检查更新';
 }
 function checkedTime(value: string): string {
@@ -24,7 +24,7 @@ function checkedTime(value: string): string {
 }
 export function confirmationMatches(status: UpdateStatus, confirmation: InstallConfirmation): boolean {
   const actual = installConfirmation(status);
-  return !!actual && actual.currentVersion === confirmation.currentVersion && actual.targetVersion === confirmation.targetVersion
+  return !!actual && actual.source === confirmation.source && actual.currentVersion === confirmation.currentVersion && actual.targetVersion === confirmation.targetVersion
     && actual.portable === confirmation.portable && actual.rollback === confirmation.rollback;
 }
 export async function confirmVersionInstall(update: UpdateContextValue, confirmation: InstallConfirmation): Promise<void> {
@@ -37,6 +37,7 @@ export function InstallVersionDialog({confirmation, busy, valid = true, onClose,
   const {portable, rollback, currentVersion, targetVersion} = confirmation;
   return <Modal title={rollback ? '确认回退版本' : portable ? '运行安装包' : '安装新版本'} onClose={() => {if (!busy) onClose()}}>
     <p className="update-confirm-target"><strong>{currentVersion} → {targetVersion}</strong></p>
+    <p className="help">更新来源：{updateSourceLabel(confirmation.source)}</p>
     <p>{rollback ? '将回退到所选旧版本。' : ''}{portable
       ? '将保存所有窗口中正在编辑的内容，然后退出洞洞板并运行安装包。请在安装器中继续完成安装。'
       : '将保存所有窗口中正在编辑的内容，然后退出并安装所选版本。'}</p>
@@ -71,12 +72,20 @@ export function UpdatePanel({update}: {update: UpdateContextValue}) {
         <RefreshCw size={15} className={status.phase === 'checking' ? 'update-spinning' : undefined}/>
         {status.phase === 'checking' || pendingAction === 'check' ? '正在检查…' : '检查更新'}</button>
     </div>
+    <label className="field update-source-select"><span>更新来源</span>
+      <select data-testid="update-source" aria-describedby="update-source-help" value={status.source}
+        disabled={!supported || busy || update.versionsLoading}
+        onChange={event => void update.setSource(event.currentTarget.value as UpdateSource)}>
+        <option value="github">GitHub</option><option value="gitee">Gitee 国内镜像</option>
+      </select></label>
+    <p className="help" id="update-source-help" role={pendingAction === 'set-source' ? 'status' : undefined}>
+      {pendingAction === 'set-source' ? '正在保存更新来源…' : '检查更新、版本列表和下载均使用所选来源，选择会保存在本机。'}</p>
     <label className="setting-toggle"><input type="checkbox" data-testid="update-auto-check"
       checked={status.autoCheckEnabled} disabled={!supported || busy}
       onChange={event => void update.setAutoCheck(event.currentTarget.checked)}/>
       <span>自动检查更新</span></label>
     <p className="help">开启后，启动时及运行期间每 6 小时检查一次，托盘运行也生效。发现新版会在左侧“版本与说明”显示提示，由你决定下载和安装。</p>
-    <div className="update-details"><span>更新来源：GitHub Releases</span>
+    <div className="update-details"><span>当前来源：{updateSourceLabel(status.source)}</span>
       <span>{status.lastCheckedAt ? '上次检查：' + checkedTime(status.lastCheckedAt) : '上次检查：尚未检查'}</span></div>
     {status.available && <div className="update-available">
       <div className="update-version"><ArrowUpCircle size={18}/><strong>新版本 {status.available.version}</strong>
@@ -86,7 +95,7 @@ export function UpdatePanel({update}: {update: UpdateContextValue}) {
         disabled={!supported || busy} onClick={() => void update.download()}><Download size={16}/>
         {downloadingLatest ? '正在下载…' : '下载更新'}</button></div>}
     </div>}
-    <ReleaseVersionPicker update={update}/>
+    <ReleaseVersionPicker key={status.source} update={update}/>
     {activeTarget && <div className="update-available update-target" aria-labelledby="update-target-title">
       <div className="update-version"><ArrowUpCircle size={18}/><strong id="update-target-title">{rollback ? '回退目标' : '安装目标'} {activeTarget.version}</strong></div>
       <p className="help">{status.currentVersion} → {activeTarget.version}</p>

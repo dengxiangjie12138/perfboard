@@ -5,6 +5,16 @@ export interface VersionHistoryEntry {version: string; dateRange: string; groups
 // Historical facts: CHANGELOG.md / README.md at dbefa503, and the corresponding
 // Git records from the initial 2026-10-01 app through dbefa503 on 2026-10-03.
 export const versionHistory: readonly VersionHistoryEntry[] = [{
+  version: '0.1.3',
+  dateRange: '2026-10-30',
+  groups: [
+    {label: '新增', items: [
+      '软件更新可选择 GitHub 或 Gitee 国内镜像，默认 GitHub，记住选择并在下次启动时恢复。',
+      '检查更新、历史版本列表和安装包下载统一使用所选来源，切换来源后重新获取对应版本信息。',
+    ]},
+    {label: '调整', items: ['两个来源共用安装包签名与版本校验，切换来源会清理旧来源的提示和下载状态；更新和回退继续保存所有窗口并保留仓库资料。']},
+  ],
+}, {
   version: '0.1.2',
   dateRange: '2026-10-29',
   groups: [

@@ -1,4 +1,4 @@
-import type {ReleaseVersion, UpdateStatus} from './updateApi';
+import type {ReleaseVersion, UpdateSource, UpdateStatus} from './updateApi';
 
 const stableVersion = /^(?:v)?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 /** Formal release versions only. BigInt keeps SemVer ordering exact for every component. */
@@ -30,6 +30,7 @@ export function releaseVersionLabel(version: ReleaseVersion, current: string, la
   return labels.join(' · ');
 }
 export interface InstallConfirmation {
+  source: UpdateSource;
   currentVersion: string;
   targetVersion: string;
   portable: boolean;
@@ -40,6 +41,6 @@ export function installConfirmation(status: UpdateStatus): InstallConfirmation |
   if (status.phase !== 'ready' || !target) return null;
   const relation = compareReleaseVersions(target.version, status.currentVersion);
   if (relation === null || relation === 0) return null;
-  return {currentVersion: status.currentVersion, targetVersion: target.version,
+  return {source: status.source, currentVersion: status.currentVersion, targetVersion: target.version,
     portable: status.installation === 'portable', rollback: relation < 0};
 }

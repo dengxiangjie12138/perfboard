@@ -469,6 +469,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             updates::update_status,
+            updates::update_set_source,
             updates::update_set_auto_check,
             updates::update_check,
             updates::update_list_versions,
