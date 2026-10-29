@@ -76,7 +76,7 @@ class ProbeRemote {
     return {tag: TAG, sourceCommit: SOURCE_COMMIT, resultFile, publicKey: this.publicKey,
       githubToken: 'fake-gh-token', giteeToken: 'fake-gitee-token', fetchImpl: this.fetch,
       uploadImpl: (url, options, policy) => {
-        assert.deepEqual(policy, {ipv4: true, timeoutMs: 110_000});
+        assert.deepEqual(policy, {ipv4: true, timeoutMs: 110_000, nativeMultipart: true});
         return this.fetch(url, options);
       }, expectedSha256: sha(this.bytes)};
   }

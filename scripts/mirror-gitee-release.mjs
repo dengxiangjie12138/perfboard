@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /** Mirror verified public GitHub releases. Environment credentials go only to fixed API origins. */
 import {createHash} from 'node:crypto';
-import {mkdir, readFile, rename, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile} from 'node:fs/promises';
 import {request as httpsRequest} from 'node:https';
 import {spawn as spawnProcess} from 'node:child_process';
 import {isIP} from 'node:net';
 import path from 'node:path';
+import os from 'node:os';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {verifySignature} from './prepare-update-release.mjs';
 
@@ -174,20 +175,36 @@ export async function uploadGiteeMultipart(value, options, {requestImpl = httpsR
 }
 
 /** Curl negotiates its own transport; credentials exist only in stdin's multipart body. */
-export async function uploadGiteeCurl(value, options, {spawnImpl = spawnProcess, ipv4 = false, timeoutMs = UPLOAD_TIMEOUT_MS} = {}) {
+export async function uploadGiteeCurl(value, options, {spawnImpl = spawnProcess, ipv4 = false, timeoutMs = UPLOAD_TIMEOUT_MS, nativeMultipart = false} = {}) {
   requireValue(Number.isInteger(timeoutMs) && timeoutMs >= 1000 && timeoutMs <= UPLOAD_TIMEOUT_MS, 'Invalid bounded upload timeout');
   const {url, signal, bytes, contentType} = await encodeGiteeMultipart(value, options);
   const marker = '\nPERFBOARD_HTTP_STATUS:';
   const metricsFormat = CURL_METRICS + '%{size_upload},%{time_connect},%{time_appconnect},%{time_starttransfer},%{time_total},%{remote_ip},%{http_version}';
+  let publicDirectory, temporaryBase, stdinBytes = bytes;
+  let payloadArguments = ['--header', 'Content-Type: ' + contentType, '--header', 'Content-Length: ' + bytes.length, '--data-binary', '@-'];
+  try {
+  if (nativeMultipart) {
+    const token = options.body.get('access_token'), file = options.body.get('file');
+    requireValue(typeof token === 'string' && token.length > 0 && file instanceof Blob
+      && /^[A-Za-z0-9_.-]+$/.test(file.name ?? '') && options.body.getAll('file').length === 1
+      && options.body.getAll('access_token').length === 1 && [...options.body.keys()].length === 2,
+    'Native multipart requires one credential field and one public attachment');
+    temporaryBase = await realpath(os.tmpdir());
+    publicDirectory = await mkdtemp(path.join(temporaryBase, 'perfboard-gitee-public-upload-'));
+    const filename = path.join(publicDirectory, file.name);
+    await writeFile(filename, Buffer.from(await file.arrayBuffer()), {flag: 'wx', mode: 0o600});
+    const quoted = filename.replaceAll('\\', '/').replaceAll('"', '\\"');
+    payloadArguments = ['--form', 'access_token=<-', '--form', `file=@"${quoted}";filename="${file.name}";type=application/octet-stream`];
+    stdinBytes = Buffer.from(token);
+  }
   const arguments_ = ['--disable', '--silent', '--show-error', '--proto', '=https', '--proto-redir', '=https',
     ...(ipv4 ? ['--ipv4'] : []), '--request', 'POST', '--max-time', String(timeoutMs / 1000), '--connect-timeout', '30',
-    '--expect100-timeout', '1', '--header', 'Content-Type: ' + contentType,
-    '--header', 'Content-Length: ' + bytes.length, '--header', 'Accept: application/json',
+    '--expect100-timeout', '1', ...payloadArguments, '--header', 'Accept: application/json',
     '--header', 'Accept-Encoding: identity', '--user-agent', 'Perfboard-Release-Mirror',
-    '--data-binary', '@-', '--write-out', metricsFormat + marker + '%{http_code}', '--url', url.href];
+    '--write-out', metricsFormat + marker + '%{http_code}', '--url', url.href];
   const environment = {...process.env};
   for (const name of ['GITEE_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN']) delete environment[name];
-  return new Promise((resolve, reject) => {
+  return await new Promise((resolve, reject) => {
     let child, failure, completed = false, length = 0, errorLength = 0;
     const chunks = [];
     const finish = (error, response) => {
@@ -231,7 +248,9 @@ export async function uploadGiteeCurl(value, options, {spawnImpl = spawnProcess,
         const safe = new Error('Curl input pipe failed'); safe.code = error?.code === 'EPIPE' ? 'ECONNRESET' : undefined;
         stop(safe);
       });
-      child.stdin.once('finish', () => options.onProgress?.(`Gitee curl request body handed to transport (${bytes.length} bytes); waiting for response`));
+      child.stdin.once('finish', () => options.onProgress?.(nativeMultipart
+        ? 'Gitee credential field handed to native curl multipart encoder; waiting for transfer'
+        : `Gitee curl request body handed to transport (${bytes.length} bytes); waiting for response`));
       child.once('close', code => {
         let output = Buffer.concat(chunks), metricsIndex = output.lastIndexOf(CURL_METRICS);
         if (metricsIndex >= 0 && output.length - metricsIndex <= CURL_METRICS_LIMIT + marker.length + 3) {
@@ -267,9 +286,15 @@ export async function uploadGiteeCurl(value, options, {spawnImpl = spawnProcess,
         } catch (error) {finish(error)}
       });
       if (signal.aborted) {abort(); return}
-      child.stdin.end(bytes);
+      child.stdin.end(stdinBytes);
     } catch (error) {if (child?.pid) stop(error); else finish(error)}
-  });
+  })} finally {
+    if (publicDirectory) {
+      const resolved = await realpath(publicDirectory);
+      requireValue(path.dirname(resolved) === temporaryBase && path.basename(resolved).startsWith('perfboard-gitee-public-upload-'), 'Refusing cleanup outside the owned public upload directory');
+      await rm(publicDirectory, {recursive: true, force: true});
+    }
+  }
 }
 
 export class MirrorHttp {

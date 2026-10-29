@@ -84,7 +84,7 @@ export async function probeUpload({tag, sourceCommit, resultFile, publicKey, git
   requireValue(giteeToken && typeof resultFile === 'string' && resultFile.length > 0, 'Probe requires configured credentials and a dedicated result file');
   const expected = {tag, sourceCommit, marker, name: `Perfboard upload probe ${tag}`};
   const boundedUpload = (url, options) => (uploadImpl ?? uploadGiteeCurl)(url,
-    {...options, signal: AbortSignal.timeout(120_000)}, {ipv4: true, timeoutMs: 110_000});
+    {...options, signal: AbortSignal.timeout(120_000)}, {ipv4: true, timeoutMs: 110_000, nativeMultipart: true});
   const http = new MirrorHttp({fetchImpl, uploadImpl: boundedUpload, githubToken, giteeToken, onProgress});
   let id = null, attempted = false, uploadVerified = false, failure = null;
   try {

@@ -1,5 +1,8 @@
 import {createHash, generateKeyPairSync, randomBytes, sign} from 'node:crypto';
 import {mkdtemp, readFile, rm, access} from 'node:fs/promises';
+import {readFileSync} from 'node:fs';
+import {spawn as spawnProcess} from 'node:child_process';
+import {createServer} from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import {test} from 'node:test';
@@ -76,7 +79,7 @@ class MockRemote {
         return json(release, 201);
       }
       const releaseId = Number(/\/releases\/(\d+)/.exec(endpoint)?.[1]);
-      if (method === 'GET' && endpoint.endsWith('/attach_files')) return json([...this.attachments.values()].filter(item => item.releaseId === releaseId).map(({bytes: _bytes, releaseId: _releaseId, ...item}) => item));
+      if (method === 'GET' && endpoint.endsWith('/attach_files')) return json([...this.attachments.values()].filter(item => item.releaseId === releaseId).map(item => ({id: item.id, name: item.name, size: item.size, browser_download_url: item.browser_download_url})));
       if (method === 'POST' && endpoint.endsWith('/attach_files')) {
         const file = options.body.get('file');
         if (this.failUpload === file.name) {this.failUpload = null; return json({}, 503)}
@@ -84,7 +87,7 @@ class MockRemote {
         const id = this.nextId++, bytes = Buffer.from(await file.arrayBuffer());
         const attachment = {id, name: file.name, size: bytes.length, browser_download_url: this.temporaryCdn ? `https://foruda.gitee.com/attachments/${id}?signature=temporary` : `https://gitee.com/${TARGET}/attach_files/${id}/download/${file.name}`, bytes, releaseId};
         this.attachments.set(id, attachment);
-        const {bytes: _bytes, releaseId: _releaseId, ...metadata} = attachment;
+        const metadata = {id, name: attachment.name, size: attachment.size, browser_download_url: attachment.browser_download_url};
         return json(metadata, 201);
       }
       if (method === 'PATCH') {
@@ -547,4 +550,50 @@ test('curl diagnostics expose only validated numeric transfer metrics on success
     assert.deepEqual(JSON.parse(metrics.slice('Gitee curl transfer metrics '.length)), {uploadBytes: 262144, connectSeconds: 0.1, tlsSeconds: 0.3, firstByteSeconds: 0.4, totalSeconds: 110.01, remoteIp: '203.0.113.5', httpVersion: '2', httpStatus: code ? 0 : 201});
     assert.ok(messages.every(message => !message.includes('fake-gitee-token') && !message.includes('Authorization') && !message.includes('https://')));
   }
+});
+
+test('native curl multipart puts only the credential in stdin and always removes its temporary public attachment', async () => {
+  for (const code of [0, 28]) {
+    const fixture = curlFixture({code});
+    let publicFile;
+    const spawnImpl = (command, args, options) => {
+      const field = args.find(value => value.startsWith('file=@'));
+      publicFile = /^file=@"([^"]+)";filename="fixture.exe";type=application\/octet-stream$/.exec(field)[1];
+      assert.equal(readFileSync(publicFile, 'utf8'), 'synthetic signed installer');
+      assert.ok(args.includes('access_token=<-'));
+      assert.ok(!args.includes('--data-binary') && !args.some(value => value.startsWith('Content-Length:') || value.startsWith('Content-Type:')));
+      assert.ok(!JSON.stringify(args).includes('fake-gitee-token'));
+      return fixture.spawnImpl(command, args, options);
+    };
+    const pending = uploadGiteeCurl(uploadUrl, nativeOptions(), {spawnImpl, nativeMultipart: true});
+    if (code) await assert.rejects(pending); else await pending;
+    assert.equal(Buffer.concat(fixture.calls[0].chunks).toString(), 'fake-gitee-token');
+    await assert.rejects(access(publicFile));
+  }
+});
+
+test('real curl native multipart sends an ordinary token field and exact file bytes to an isolated loopback receiver', async t => {
+  let received;
+  const server = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    const form = await new Response(Buffer.concat(chunks), {headers: {'Content-Type': request.headers['content-type']}}).formData();
+    received = {keys: [...form.keys()], token: form.get('access_token'), name: form.get('file').name, bytes: await form.get('file').text(), contentLength: request.headers['content-length']};
+    response.end('{"id":1}');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const spawnImpl = (command, args, options) => {
+    // Only this test redirects the child to an isolated local HTTP receiver.
+    // Production validation still receives and accepts only the fixed HTTPS API.
+    const localArgs = [args[0], '--noproxy', '*', ...args.slice(1).map(value => value === uploadUrl ? `http://127.0.0.1:${server.address().port}/upload` : value === '=https' ? '=http' : value)];
+    return spawnProcess(command, localArgs, options);
+  };
+  const result = await uploadGiteeCurl(uploadUrl, {...nativeOptions(), signal: AbortSignal.timeout(5000)}, {spawnImpl, nativeMultipart: true});
+  assert.deepEqual(await result.json(), {id: 1});
+  assert.deepEqual(received.keys, ['access_token', 'file']);
+  assert.equal(received.token, 'fake-gitee-token');
+  assert.equal(received.name, 'fixture.exe');
+  assert.equal(received.bytes, 'synthetic signed installer');
+  assert.ok(Number(received.contentLength) > received.bytes.length);
 });
