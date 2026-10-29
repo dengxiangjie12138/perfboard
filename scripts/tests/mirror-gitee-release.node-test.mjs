@@ -240,3 +240,46 @@ test('draft GitHub releases are not mirrored', async t => {
   await assert.rejects(mirrorRelease(remote.options(await directory(t))), /published stable/);
   assert.equal(remote.calls.filter(call => call.method !== 'GET').length, 0);
 });
+
+test('large attachment uploads have a bounded ten-minute deadline while metadata keeps its three-minute deadline', async t => {
+  const timeouts = [];
+  t.mock.method(AbortSignal, 'timeout', duration => {
+    timeouts.push(duration);
+    return new AbortController().signal;
+  });
+  const http = new MirrorHttp({fetchImpl: async () => json({})});
+  await http.api('gitee', 'GET', '/releases');
+  const form = new FormData();
+  form.append('file', new Blob(['synthetic installer']), 'fixture.exe');
+  await http.api('gitee', 'POST', '/releases/1/attach_files', form);
+  assert.deepEqual(timeouts, [180_000, 600_000]);
+});
+
+test('upload failures explain timeout or network categories without exposing raw errors or retrying ambiguous POSTs', async () => {
+  const form = new FormData();
+  form.append('file', new Blob(['synthetic installer']), 'fixture.exe');
+  for (const [name, code, expected] of [['TimeoutError', undefined, /timed out.*request limit 600s/], ['TypeError', 'ECONNRESET', /request failed.*ECONNRESET.*request limit 600s/]]) {
+    let requests = 0;
+    const error = new Error('fake-gitee-token https://private.invalid/path?token=secret');
+    error.name = name;
+    error.cause = {code, message: 'secret Authorization: Bearer fake-gitee-token'};
+    const http = new MirrorHttp({giteeToken: 'fake-gitee-token', fetchImpl: async () => {requests++; throw error}});
+    await assert.rejects(http.api('gitee', 'POST', '/releases/1/attach_files', form), failure => {
+      assert.match(failure.message, expected);
+      assert.ok(!failure.message.includes('fake-gitee-token') && !failure.message.includes('private.invalid') && !failure.message.includes('Authorization'));
+      assert.equal(failure.cause, undefined);
+      return true;
+    });
+    assert.equal(requests, 1);
+  }
+});
+
+test('CLI progress can identify each upload and verified public download without credentials or temporary URLs', async t => {
+  const remote = new MockRemote(), messages = [];
+  const result = await mirrorRelease({...remote.options(await directory(t)), onProgress: message => messages.push(message)});
+  assert.equal(messages.filter(message => message.startsWith('Uploading Gitee attachment ')).length, 4);
+  assert.equal(messages.filter(message => message.startsWith('Verified Gitee attachment ')).length, 4);
+  assert.ok(messages.some(message => message.includes('Perfboard_0.1.2_x64-setup.exe') && message.includes('request limit 600s')));
+  assert.ok(messages.every(message => !message.includes('fake-gh-token') && !message.includes('fake-gitee-token') && !message.includes('signature=') && !message.includes('https://')));
+  assert.equal(result.status, 'mirrored');
+});

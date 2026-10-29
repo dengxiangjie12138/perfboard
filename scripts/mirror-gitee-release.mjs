@@ -14,6 +14,18 @@ const GITEE = `https://gitee.com/api/v5/repos/${TARGET}`;
 const MAX_EXE = 100_000_000;
 const MAX_JSON = 4 * 1024 * 1024;
 const MINIMUM = [0, 1, 1];
+const API_TIMEOUT_MS = 180_000;
+const UPLOAD_TIMEOUT_MS = 600_000;
+const NETWORK_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET']);
+
+function networkFailure(context, error, timeout) {
+  // Node errors can embed full URLs, headers or credentials in their message.
+  // Report only fixed error names/codes, without retaining the original cause.
+  const code = [error?.code, error?.cause?.code].find(value => NETWORK_CODES.has(value));
+  const name = ['TimeoutError', 'AbortError', 'TypeError', 'Error'].includes(error?.name) ? error.name : 'NetworkError';
+  const timedOut = ['TimeoutError', 'AbortError'].includes(name) || code?.includes('TIMEOUT') || code === 'ETIMEDOUT';
+  return new Error(`${context} ${timedOut ? 'timed out' : 'request failed'} (${name}${code ? '; ' + code : ''}; request limit ${timeout / 1000}s)`);
+}
 
 function requireValue(condition, message) {if (!condition) throw new Error(message)}
 export function parseTag(tag) {
@@ -66,10 +78,11 @@ async function responseBytes(response, limit) {
 }
 
 export class MirrorHttp {
-  constructor({fetchImpl = globalThis.fetch, githubToken, giteeToken} = {}) {
+  constructor({fetchImpl = globalThis.fetch, githubToken, giteeToken, onProgress = () => {}} = {}) {
     this.fetch = fetchImpl;
     this.githubToken = githubToken;
     this.giteeToken = giteeToken;
+    this.report = onProgress;
   }
   async api(provider, method, endpoint, data, allowMissing = false) {
     const base = provider === 'github' ? GITHUB : GITEE;
@@ -81,9 +94,10 @@ export class MirrorHttp {
     let body;
     if (data instanceof FormData) body = data;
     else if (data !== undefined) {body = new URLSearchParams(Object.entries(data).map(([key, value]) => [key, String(value)])); headers['Content-Type'] = 'application/x-www-form-urlencoded'}
+    const timeout = data instanceof FormData ? UPLOAD_TIMEOUT_MS : API_TIMEOUT_MS;
     let response;
-    try {response = await this.fetch(url, {method, headers, body, redirect: 'manual', signal: AbortSignal.timeout(180_000)})}
-    catch {throw new Error(`${provider} API ${method} request failed`)}
+    try {response = await this.fetch(url, {method, headers, body, redirect: 'manual', signal: AbortSignal.timeout(timeout)})}
+    catch (error) {throw networkFailure(`${provider} API ${method}`, error, timeout)}
     if (allowMissing && response.status === 404 && method === 'GET') return null;
     requireValue(response.ok, `${provider} API ${method} failed (HTTP ${response.status})`);
     if (response.status === 204) return null;
@@ -101,8 +115,8 @@ export class MirrorHttp {
       requireValue(allowed, 'Unexpected asset download host');
       let response;
       // API credentials are deliberately absent even on the first download hop.
-      try {response = await this.fetch(url.href, {headers: {'User-Agent': 'Perfboard-Release-Mirror', 'Cache-Control': 'no-cache'}, redirect: 'manual', signal: AbortSignal.timeout(180_000)})}
-      catch {throw new Error(`${provider} public asset download failed`)}
+      try {response = await this.fetch(url.href, {headers: {'User-Agent': 'Perfboard-Release-Mirror', 'Cache-Control': 'no-cache'}, redirect: 'manual', signal: AbortSignal.timeout(API_TIMEOUT_MS)})}
+      catch (error) {throw networkFailure(`${provider} public asset download`, error, API_TIMEOUT_MS)}
       if ([301, 302, 303, 307, 308].includes(response.status)) {
         requireValue(response.headers.has('location'), 'Asset redirect has no location');
         url = httpsUrl(new URL(response.headers.get('location'), url).href);
@@ -189,14 +203,18 @@ async function ensureAttachment(http, release, existing, name, bytes) {
     requireValue(release.prerelease === true, 'A completed Gitee mirror is missing an asset; no public release was modified');
     const form = new FormData();
     form.append('file', new Blob([bytes], {type: name.endsWith('.exe') ? 'application/vnd.microsoft.portable-executable' : name.endsWith('.json') ? 'application/json' : 'text/plain'}), name);
+    http.report(`Uploading Gitee attachment ${name} (${bytes.length} bytes; request limit ${UPLOAD_TIMEOUT_MS / 1000}s)`);
     attachment = await http.api('gitee', 'POST', `/releases/${release.id}/attach_files`, form);
     requireValue(attachment.name === name, 'Gitee renamed an uploaded asset; mirror was not finalized');
     uploaded = true;
+    http.report(`Uploaded Gitee attachment ${name}; verifying its public download`);
   }
+  else http.report(`Reusing Gitee attachment ${name}; verifying its public download`);
   requireValue(attachment.size === bytes.length, `Gitee asset size differs: ${name}; no overwrite performed`);
   const url = stableGiteeUrl(attachment, name);
   const downloaded = await http.download(url, 'gitee', name.endsWith('.exe') ? MAX_EXE : MAX_JSON);
   requireValue(hash(downloaded) === hash(bytes), `Gitee asset hash differs: ${name}; no overwrite performed`);
+  http.report(`Verified Gitee attachment ${name} (${bytes.length} bytes)`);
   return {id: attachment.id, name, bytes: bytes.length, sha256: hash(bytes), url, uploaded};
 }
 
@@ -241,11 +259,11 @@ async function prepareIndexes(directory, source, manifest, latestTag, tokens) {
   return {directory: output, latestPromoted: promote, latestVersion: promote ? source.version : previousLatest?.version ?? null};
 }
 
-export async function mirrorRelease({tag, updatesDirectory, dryRun = false, publicKey, githubToken, giteeToken, fetchImpl} = {}) {
+export async function mirrorRelease({tag, updatesDirectory, dryRun = false, publicKey, githubToken, giteeToken, fetchImpl, onProgress} = {}) {
   const parsed = parseTag(tag);
   if (compare(parsed.parts, MINIMUM) < 0) return {status: 'skipped', tag, reason: 'Unsigned legacy release below v0.1.1 is not mirrored'};
   requireValue(dryRun || giteeToken, 'GITEE_TOKEN is required for release mirroring; dry-run needs no Gitee credentials');
-  const http = new MirrorHttp({fetchImpl, githubToken, giteeToken: dryRun ? undefined : giteeToken});
+  const http = new MirrorHttp({fetchImpl, githubToken, giteeToken: dryRun ? undefined : giteeToken, onProgress});
   const source = await githubRelease(http, tag, publicKey);
   noSecrets(JSON.stringify(source.manifest), [githubToken, giteeToken]);
   const latest = await http.api('github', 'GET', '/releases/latest');
@@ -294,6 +312,7 @@ async function main(args) {
   options.publicKey = config.plugins?.updater?.pubkey;
   options.githubToken = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
   options.giteeToken = options.dryRun ? undefined : process.env.GITEE_TOKEN;
+  options.onProgress = message => console.error(message);
   console.log(JSON.stringify(await mirrorRelease(options), null, 2));
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
