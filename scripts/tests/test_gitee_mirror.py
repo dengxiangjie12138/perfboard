@@ -37,7 +37,8 @@ class MirrorTests(unittest.TestCase):
         for tag in ("v0.1.1", "v0.1.2", "v0.2.0-rc.1", "0.1.3"):
             self.git("tag", tag, cwd=self.source)
         self.environment = dict(os.environ, GITEE_TOKEN="fixture-not-a-real-token", GITEE_USERNAME="deng-xiangjie",
-                                RUNNER_TEMP=str(self.root), GITHUB_STEP_SUMMARY=str(self.root / "summary.md"))
+                                RUNNER_TEMP=str(self.root), GITHUB_STEP_SUMMARY=str(self.root / "summary.md"),
+                                EVENT_NAME="push")
         self.git_client = mirror.Git(self.environment)
 
     def git(self, *arguments, cwd=None):
@@ -142,7 +143,7 @@ class MirrorTests(unittest.TestCase):
             self.assertFalse((directory / "releases/v0.1.2.json").exists())
             (directory / "releases/v0.1.2.json").write_text('{"version":"0.1.2"}', encoding="utf-8")
 
-        with patch.object(mirror, "mirror_release", side_effect=release), patch.object(mirror.time, "sleep") as sleep:
+        with patch.object(mirror, "mirror_release", side_effect=release), patch.object(mirror, "retry_sleep") as sleep:
             mirror.sync(["v0.1.2"], self.source, self.environment, str(self.remote))
         sleep.assert_called_once_with(30)
         self.assertEqual(len(attempts), 2)
@@ -165,7 +166,7 @@ class MirrorTests(unittest.TestCase):
             return changed
 
         with patch.object(mirror, "mirror_release", side_effect=lambda _tag, directory, _env: self.write_index(directory, "0.1.2")), \
-                patch.object(mirror, "publish_index", side_effect=publish_then_disconnect), patch.object(mirror.time, "sleep"):
+                patch.object(mirror, "publish_index", side_effect=publish_then_disconnect), patch.object(mirror, "retry_sleep"):
             mirror.sync(["v0.1.2"], self.source, self.environment, str(self.remote))
         self.assertEqual(len(committed), 2)
         self.assertEqual(committed[0], committed[1])
@@ -175,7 +176,7 @@ class MirrorTests(unittest.TestCase):
             self.write_index(directory, "0.1.2")
             raise subprocess.CalledProcessError(75, ["node", "fixture"])
 
-        with patch.object(mirror, "mirror_release", side_effect=fail) as release, patch.object(mirror.time, "sleep") as sleep:
+        with patch.object(mirror, "mirror_release", side_effect=fail) as release, patch.object(mirror, "retry_sleep") as sleep:
             with self.assertRaises(subprocess.CalledProcessError):
                 mirror.sync(["v0.1.2"], self.source, self.environment, str(self.remote))
         self.assertEqual(release.call_count, 3)
@@ -188,7 +189,7 @@ class MirrorTests(unittest.TestCase):
                       subprocess.CalledProcessError(-15, ["node", "fixture"]),
                       mirror.GitFailure("Different history"), ValueError("Invalid index")]:
             with self.subTest(error=type(error).__name__), patch.object(mirror, "sync_once", side_effect=error) as once, \
-                    patch.object(mirror.time, "sleep") as sleep:
+                    patch.object(mirror, "retry_sleep") as sleep:
                 with self.assertRaises(type(error)):
                     mirror.sync(["v0.1.2"], self.source, self.environment, str(self.remote))
                 once.assert_called_once()

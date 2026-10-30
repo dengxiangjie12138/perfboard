@@ -11,7 +11,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
-import time
+from time import sleep as retry_sleep
 
 ROOT = Path(__file__).resolve().parents[1]
 REMOTE = "https://gitee.com/deng-xiangjie/perfboard.git"
@@ -394,7 +394,7 @@ def sync(tags: list[str], source: Path, environment: dict[str, str], remote: str
                        "remote releases, attachments and the current index will be rechecked.") % (attempt, SYNC_ATTEMPTS, delay)
             print("::warning::" + message, flush=True)
             append_summary(environment, "- " + message)
-            time.sleep(delay)
+            retry_sleep(delay)
         else:
             append_summary(environment, "### Gitee mirror completed\n\n"
                            + "- Attempts: %d/%d.\n" % (attempt, SYNC_ATTEMPTS)
