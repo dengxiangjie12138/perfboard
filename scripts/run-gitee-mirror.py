@@ -11,6 +11,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 REMOTE = "https://gitee.com/deng-xiangjie/perfboard.git"
@@ -18,6 +19,9 @@ INDEX_REF = "refs/heads/gitee-updates"
 STABLE = re.compile(r"v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 PROBE_TAG = re.compile(r"mirror-upload-probe-[1-9][0-9]*-[1-9][0-9]*-[0-9a-f]{16}\Z")
 PROBE_SOURCE_COMMIT = "82a1c0af8c1ff950604a8b293093e71abd7ae920"
+TEMPORARY_EXIT_CODE = 75
+SYNC_ATTEMPTS = 3
+SYNC_RETRY_DELAYS = (30, 60)
 
 
 def append_summary(environment: dict[str, str], text: str) -> None:
@@ -73,7 +77,27 @@ def redacted(text: str, environment: dict[str, str]) -> str:
 
 
 class GitFailure(RuntimeError):
-    pass
+    def __init__(self, message: str, *, retryable: bool = False, index_conflict: bool = False):
+        super().__init__(message)
+        self.retryable = retryable
+        self.index_conflict = index_conflict
+
+
+def temporary_git_failure(stdout: str, stderr: str) -> bool:
+    # Use Git's C-locale diagnostics only for remote operations. History,
+    # permission and certificate failures must never become retry loops.
+    text = stdout + "\n" + stderr
+    if re.search(r"\[(?:rejected|remote rejected)\]|authentication failed|access denied|permission denied|"
+                 r"could not read (?:username|password)|certificate (?:problem|verification failed)|"
+                 r"SSL certificate|requested URL returned error: (?:401|403)", text, re.IGNORECASE):
+        return False
+    return bool(re.search(
+        r"could not resolve (?:host|proxy)|failed to connect to|connection (?:timed out|reset|refused|closed)|"
+        r"operation timed out|remote end hung up unexpectedly|SSL_ERROR_SYSCALL|"
+        r"(?:recv|send) failure|TLS connection was non-properly terminated|"
+        r"requested URL returned error: (?:408|429|5[0-9]{2})\b|"
+        r"RPC failed; curl (?:5|6|7|16|18|28|35|52|55|56|92|95|97)\b",
+        text, re.IGNORECASE))
 
 
 class Git:
@@ -83,11 +107,20 @@ class Git:
     def __call__(self, *arguments: str, cwd: Path, accepted: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess:
         command = ["git", "-c", "credential.helper=", "-c", "credential.useHttpPath=true",
                    "-c", "http.followRedirects=false", *arguments]
-        result = subprocess.run(command, cwd=cwd, env=self.environment, text=True,
-                                encoding="utf-8", errors="replace", capture_output=True, timeout=600)
+        remote_operation = arguments[0] in ("push", "fetch", "ls-remote")
+        try:
+            result = subprocess.run(command, cwd=cwd, env=self.environment, text=True,
+                                    encoding="utf-8", errors="replace", capture_output=True, timeout=600)
+        except subprocess.TimeoutExpired:
+            if not remote_operation:
+                raise
+            raise GitFailure("Gitee Git 请求达到 600 秒期限；重试前会重新读取远端状态。", retryable=True) from None
         if result.returncode not in accepted:
             raise GitFailure("Gitee Git 同步失败；请检查权限或不同历史。main 和已有版本标签不会被强推。\n"
-                             + redacted(result.stderr, self.environment))
+                             + redacted(result.stderr, self.environment),
+                             retryable=result.returncode > 0 and remote_operation and temporary_git_failure(result.stdout, result.stderr),
+                             index_conflict=result.returncode > 0 and any(line == "!\tHEAD:" + INDEX_REF + "\t[rejected] (stale info)"
+                                                for line in result.stdout.splitlines()))
         return result
 
 
@@ -133,8 +166,13 @@ def publish_index(git: Git, directory: Path, remote: str, base: str, tags: list[
         return False
     git("-c", "user.name=Perfboard mirror", "-c", "user.email=mirror@users.noreply.github.com",
         "commit", "--quiet", "-m", "Mirror verified release metadata: " + ", ".join(tags), cwd=directory)
-    git("push", "--porcelain", "--force-with-lease=" + INDEX_REF + ":" + base,
-        remote, "HEAD:" + INDEX_REF, cwd=directory)
+    try:
+        git("push", "--porcelain", "--force-with-lease=" + INDEX_REF + ":" + base,
+            remote, "HEAD:" + INDEX_REF, cwd=directory)
+    except GitFailure as error:
+        if not error.index_conflict:
+            raise
+        raise GitFailure("Gitee 更新索引已被其它操作更新，将重新读取后重试。", retryable=True) from None
     return True
 
 
@@ -306,11 +344,9 @@ def cleanup_upload(source: Path, environment: dict[str, str]) -> None:
                            + "` are absent. No installer was uploaded. Production releases and update indexes were not modified.")
 
 
-def sync(tags: list[str], source: Path, environment: dict[str, str], remote: str = REMOTE) -> None:
-    if not environment.get("GITEE_TOKEN", "").strip():
-        raise ValueError("Mirror authorization is unavailable; no writes were started.")
-    if any(STABLE.fullmatch(tag) is None for tag in tags):
-        raise ValueError("Invalid release selection; no writes were started.")
+def sync_once(tags: list[str], source: Path, environment: dict[str, str], remote: str) -> None:
+    # A failed upload can have succeeded remotely. Every attempt gets a fresh
+    # index and re-enters release/attachment discovery and hash verification.
     with tempfile.TemporaryDirectory(prefix="perfboard-gitee-", dir=environment.get("RUNNER_TEMP")) as temporary:
         root = Path(temporary)
         child = credential_environment(root, environment)
@@ -334,10 +370,38 @@ def sync(tags: list[str], source: Path, environment: dict[str, str], remote: str
                 mirror_release(tag, index, child)
             changed = publish_index(git, index, remote, base, tags)
             print("Verified JSON index published with CAS." if changed else "Update index already matches; no commit needed.")
-        append_summary(environment, "### Gitee mirror completed\n\n"
-                       "- Source: GitHub main and %d stable version tags.\n" % len(version_tags)
-                       + "- Releases requested: " + (", ".join(tags) or "none (code only)") + ".\n"
-                       + "- Destination: https://gitee.com/deng-xiangjie/perfboard")
+
+
+def sync(tags: list[str], source: Path, environment: dict[str, str], remote: str = REMOTE) -> None:
+    if not environment.get("GITEE_TOKEN", "").strip():
+        raise ValueError("Mirror authorization is unavailable; no writes were started.")
+    if any(STABLE.fullmatch(tag) is None for tag in tags):
+        raise ValueError("Invalid release selection; no writes were started.")
+    for attempt in range(1, SYNC_ATTEMPTS + 1):
+        print("Gitee mirror attempt %d/%d." % (attempt, SYNC_ATTEMPTS), flush=True)
+        try:
+            sync_once(tags, source, environment, remote)
+        except (GitFailure, subprocess.CalledProcessError) as error:
+            retryable = (error.retryable if isinstance(error, GitFailure)
+                         else error.returncode == TEMPORARY_EXIT_CODE)
+            if not retryable or attempt == SYNC_ATTEMPTS:
+                append_summary(environment, "### Gitee mirror failed\n\n"
+                               + ("Temporary failures exhausted all 3 attempts. " if retryable else "A non-retryable error stopped synchronization. ")
+                               + "Only verified files can enter the update index. See the failed step for the cause; rerun the same tag after resolving it.")
+                raise
+            delay = SYNC_RETRY_DELAYS[attempt - 1]
+            message = ("Temporary Gitee mirror failure on attempt %d/%d. Retrying in %d seconds; "
+                       "remote releases, attachments and the current index will be rechecked.") % (attempt, SYNC_ATTEMPTS, delay)
+            print("::warning::" + message, flush=True)
+            append_summary(environment, "- " + message)
+            time.sleep(delay)
+        else:
+            append_summary(environment, "### Gitee mirror completed\n\n"
+                           + "- Attempts: %d/%d.\n" % (attempt, SYNC_ATTEMPTS)
+                           + "- Source: GitHub main and stable version tags.\n"
+                           + "- Releases requested: " + (", ".join(tags) or "none (code only)") + ".\n"
+                           + "- Destination: https://gitee.com/deng-xiangjie/perfboard")
+            return
 
 
 def main(argv: list[str] | None = None) -> int:

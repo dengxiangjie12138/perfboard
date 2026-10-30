@@ -119,9 +119,108 @@ class MirrorTests(unittest.TestCase):
         mirror.publish_index(self.git_client, concurrent, str(self.remote), concurrent_base, ["v0.1.2"])
         current = self.git("--git-dir", str(self.remote), "rev-parse", mirror.INDEX_REF)
         self.write_index(stale, "0.1.3")
-        with self.assertRaises(mirror.GitFailure):
+        with self.assertRaises(mirror.GitFailure) as failure:
             mirror.publish_index(self.git_client, stale, str(self.remote), stale_base, ["v0.1.3"])
+        self.assertTrue(failure.exception.retryable)
         self.assertEqual(self.git("--git-dir", str(self.remote), "rev-parse", mirror.INDEX_REF), current)
+
+    def test_transient_release_failure_discards_partial_files_and_refetches_current_index(self):
+        initial, base = self.index("initial-retry-index")
+        self.write_index(initial, "0.1.1")
+        mirror.publish_index(self.git_client, initial, str(self.remote), base, ["v0.1.1"])
+        attempts = []
+
+        def release(_tag, directory, _environment):
+            attempts.append(directory)
+            if len(attempts) == 1:
+                self.write_index(directory, "0.1.2")  # Unpublished partial output.
+                concurrent, current_base = self.index("newer-remote-index")
+                self.write_index(concurrent, "0.1.3")
+                mirror.publish_index(self.git_client, concurrent, str(self.remote), current_base, ["v0.1.3"])
+                raise subprocess.CalledProcessError(75, ["node", "fixture"])
+            self.assertEqual(json.loads((directory / "latest.json").read_text())["version"], "0.1.3")
+            self.assertFalse((directory / "releases/v0.1.2.json").exists())
+            (directory / "releases/v0.1.2.json").write_text('{"version":"0.1.2"}', encoding="utf-8")
+
+        with patch.object(mirror, "mirror_release", side_effect=release), patch.object(mirror.time, "sleep") as sleep:
+            mirror.sync(["v0.1.2"], self.source, self.environment, str(self.remote))
+        sleep.assert_called_once_with(30)
+        self.assertEqual(len(attempts), 2)
+        self.assertNotEqual(attempts[0], attempts[1])
+        self.assertFalse(attempts[0].exists())
+        latest = json.loads(self.git("--git-dir", str(self.remote), "show", mirror.INDEX_REF + ":latest.json"))
+        self.assertEqual(latest["version"], "0.1.3")
+        self.assertIn("Attempts: 2/3", (self.root / "summary.md").read_text())
+
+    def test_lost_index_push_response_is_reconciled_without_duplicate_commit(self):
+        publish = mirror.publish_index
+        committed = []
+
+        def publish_then_disconnect(*args):
+            changed = publish(*args)
+            committed.append(self.git("--git-dir", str(self.remote), "rev-parse", mirror.INDEX_REF))
+            if len(committed) == 1:
+                raise mirror.GitFailure("Synthetic lost response", retryable=True)
+            self.assertFalse(changed)
+            return changed
+
+        with patch.object(mirror, "mirror_release", side_effect=lambda _tag, directory, _env: self.write_index(directory, "0.1.2")), \
+                patch.object(mirror, "publish_index", side_effect=publish_then_disconnect), patch.object(mirror.time, "sleep"):
+            mirror.sync(["v0.1.2"], self.source, self.environment, str(self.remote))
+        self.assertEqual(len(committed), 2)
+        self.assertEqual(committed[0], committed[1])
+
+    def test_transient_failure_exhausts_three_attempts_without_publishing_partial_index(self):
+        def fail(_tag, directory, _environment):
+            self.write_index(directory, "0.1.2")
+            raise subprocess.CalledProcessError(75, ["node", "fixture"])
+
+        with patch.object(mirror, "mirror_release", side_effect=fail) as release, patch.object(mirror.time, "sleep") as sleep:
+            with self.assertRaises(subprocess.CalledProcessError):
+                mirror.sync(["v0.1.2"], self.source, self.environment, str(self.remote))
+        self.assertEqual(release.call_count, 3)
+        self.assertEqual([call.args[0] for call in sleep.call_args_list], [30, 60])
+        self.assertEqual(self.git("--git-dir", str(self.remote), "for-each-ref", "--format=%(refname)", mirror.INDEX_REF), "")
+        self.assertIn("exhausted all 3 attempts", (self.root / "summary.md").read_text())
+
+    def test_permanent_errors_and_cancelled_processes_do_not_retry(self):
+        for error in [subprocess.CalledProcessError(1, ["node", "fixture"]),
+                      subprocess.CalledProcessError(-15, ["node", "fixture"]),
+                      mirror.GitFailure("Different history"), ValueError("Invalid index")]:
+            with self.subTest(error=type(error).__name__), patch.object(mirror, "sync_once", side_effect=error) as once, \
+                    patch.object(mirror.time, "sleep") as sleep:
+                with self.assertRaises(type(error)):
+                    mirror.sync(["v0.1.2"], self.source, self.environment, str(self.remote))
+                once.assert_called_once()
+                sleep.assert_not_called()
+
+    def test_git_connection_and_server_failures_retry_but_auth_history_and_certificates_stop(self):
+        for message in ["fatal: Could not resolve host: gitee.com", "fatal: Connection reset by peer",
+                        "fatal: The requested URL returned error: 503", "error: RPC failed; curl 28 Operation timed out"]:
+            with self.subTest(message=message):
+                self.assertTrue(mirror.temporary_git_failure("", message))
+        for message in ["fatal: Authentication failed", "fatal: The requested URL returned error: 403",
+                        "fatal: SSL certificate problem: certificate has expired", "fatal: unknown error"]:
+            with self.subTest(message=message):
+                self.assertFalse(mirror.temporary_git_failure("", message))
+        self.assertFalse(mirror.temporary_git_failure("!\tmain:main\t[rejected] (non-fast-forward)", "Connection reset by peer"))
+
+    def test_git_remote_timeout_is_retryable_and_credentials_are_redacted(self):
+        with patch.object(mirror.subprocess, "run", side_effect=subprocess.TimeoutExpired(["git"], 600)):
+            with self.assertRaises(mirror.GitFailure) as timeout:
+                self.git_client("ls-remote", "--heads", str(self.remote), cwd=self.source)
+        self.assertTrue(timeout.exception.retryable)
+        result = subprocess.CompletedProcess(["git"], 128, "", "Connection reset by peer " + self.environment["GITEE_TOKEN"])
+        with patch.object(mirror.subprocess, "run", return_value=result):
+            with self.assertRaises(mirror.GitFailure) as connection:
+                self.git_client("push", str(self.remote), "main", cwd=self.source)
+        self.assertTrue(connection.exception.retryable)
+        self.assertNotIn(self.environment["GITEE_TOKEN"], str(connection.exception))
+        cancelled = subprocess.CompletedProcess(["git"], -15, "", "Connection reset by peer")
+        with patch.object(mirror.subprocess, "run", return_value=cancelled):
+            with self.assertRaises(mirror.GitFailure) as interrupted:
+                self.git_client("push", str(self.remote), "main", cwd=self.source)
+        self.assertFalse(interrupted.exception.retryable)
 
     def test_existing_index_with_source_files_is_rejected_before_checkout(self):
         self.git("push", "--quiet", str(self.remote), "HEAD:" + mirror.INDEX_REF, cwd=self.source)

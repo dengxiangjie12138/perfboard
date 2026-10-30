@@ -9,7 +9,7 @@ import {test} from 'node:test';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
 import assert from 'node:assert/strict';
-import {mirrorRelease, MirrorHttp, uploadGiteeMultipart, uploadGiteeCurl, SOURCE, TARGET} from '../mirror-gitee-release.mjs';
+import {mirrorRelease, MirrorHttp, uploadGiteeMultipart, uploadGiteeCurl, SOURCE, TARGET, MIRROR_TEMPORARY_EXIT_CODE, isRetryableMirrorError, mirrorFailureExitCode} from '../mirror-gitee-release.mjs';
 
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const json = (body, status = 200) => new Response(JSON.stringify(body), {status, headers: {'Content-Type': 'application/json'}});
@@ -190,13 +190,21 @@ test('attachment metadata switching between tag aliases and ID paths remains byt
 
 test('tampered source bytes fail signature verification before any target mutation', async t => {
   const remote = new MockRemote(); remote.corruptSource = true;
-  await assert.rejects(mirrorRelease(remote.options(await directory(t))), /signature verification/);
+  await assert.rejects(mirrorRelease(remote.options(await directory(t))), error => {
+    assert.match(error.message, /signature verification/);
+    assert.equal(mirrorFailureExitCode(error), 1);
+    return true;
+  });
   assert.equal(remote.calls.filter(call => call.method !== 'GET').length, 0);
 });
 
 test('a different source/Gitee tag commit blocks creating a release', async t => {
   const remote = new MockRemote(); remote.wrongTag = true;
-  await assert.rejects(mirrorRelease(remote.options(await directory(t))), /tag differs/);
+  await assert.rejects(mirrorRelease(remote.options(await directory(t))), error => {
+    assert.match(error.message, /tag differs/);
+    assert.equal(mirrorFailureExitCode(error), 1);
+    return true;
+  });
   assert.equal(remote.calls.filter(call => call.method !== 'GET').length, 0);
 });
 
@@ -211,6 +219,89 @@ test('an interrupted upload never emits a usable pointer and can safely resume t
   await mirrorRelease(remote.options(folder));
   assert.equal(remote.uploads, 4);
   assert.equal(remote.releases.get('v0.1.2').prerelease, false);
+});
+
+test('a committed upload with a lost response exits temporarily and is verified and reused by the next complete attempt', async t => {
+  const folder = await directory(t), remote = new MockRemote(), installer = 'Perfboard_0.1.2_x64-setup.exe';
+  let lost = false, installerPosts = 0;
+  const transport = async (url, options = {}) => {
+    const isInstallerPost = options.method === 'POST' && options.body instanceof FormData && options.body.get('file')?.name === installer;
+    if (isInstallerPost) installerPosts++;
+    const response = await remote.fetch(url, options);
+    if (isInstallerPost && !lost) {
+      lost = true;
+      const error = new TypeError('private URL and fake-gitee-token');
+      error.cause = {code: 'ECONNRESET', message: 'Authorization fake-gitee-token'};
+      throw error;
+    }
+    return response;
+  };
+  const options = {...remote.options(folder), fetchImpl: transport, uploadImpl: transport};
+  await assert.rejects(mirrorRelease(options), error => {
+    assert.equal(isRetryableMirrorError(error), true);
+    assert.equal(mirrorFailureExitCode(error), MIRROR_TEMPORARY_EXIT_CODE);
+    assert.ok(!error.message.includes('fake-gitee-token') && !error.message.includes('private URL'));
+    assert.equal(error.cause, undefined);
+    return true;
+  });
+  assert.equal(remote.uploads, 2);
+  assert.equal(remote.releases.get('v0.1.2').prerelease, true);
+  await assert.rejects(access(path.join(folder, 'latest.json')));
+  const resumed = await mirrorRelease(options);
+  assert.equal(resumed.status, 'mirrored');
+  assert.equal(installerPosts, 1);
+  assert.equal(remote.uploads, 4);
+  assert.equal(resumed.assets.find(item => item.name === installer).uploaded, false);
+  assert.equal(remote.releases.get('v0.1.2').prerelease, false);
+});
+
+test('a lost release creation response resumes only the exact owned staging release without a second create', async t => {
+  const folder = await directory(t), remote = new MockRemote();
+  let lost = false;
+  const transport = async (url, options = {}) => {
+    const response = await remote.fetch(url, options);
+    if (!lost && options.method === 'POST' && url === `https://gitee.com/api/v5/repos/${TARGET}/releases`) {
+      lost = true;
+      const error = new Error('private request body'); error.code = 'ECONNRESET'; throw error;
+    }
+    return response;
+  };
+  const options = {...remote.options(folder), fetchImpl: transport, uploadImpl: transport};
+  await assert.rejects(mirrorRelease(options), isRetryableMirrorError);
+  assert.equal(remote.releases.size, 1);
+  assert.equal(remote.uploads, 0);
+  await mirrorRelease(options);
+  assert.equal(remote.calls.filter(call => call.method === 'POST' && call.url === `https://gitee.com/api/v5/repos/${TARGET}/releases`).length, 1);
+  assert.equal(remote.uploads, 4);
+});
+
+test('a conflicting remote attachment remains a permanent failure rather than requesting a coordinator retry', async t => {
+  const folder = await directory(t), remote = new MockRemote();
+  await mirrorRelease(remote.options(folder));
+  const attachment = [...remote.attachments.values()].find(item => item.name.endsWith('.exe'));
+  attachment.bytes[50] ^= 1;
+  await assert.rejects(mirrorRelease(remote.options(folder)), error => {
+    assert.match(error.message, /asset hash differs/);
+    assert.equal(isRetryableMirrorError(error), false);
+    assert.equal(mirrorFailureExitCode(error), 1);
+    return true;
+  });
+  assert.equal(remote.uploads, 4);
+});
+
+test('duplicate remote attachments block automatic recovery before any further upload or publication', async t => {
+  const folder = await directory(t), remote = new MockRemote();
+  await mirrorRelease(remote.options(folder));
+  const attachment = [...remote.attachments.values()].find(item => item.name.endsWith('.exe'));
+  remote.attachments.set(999, {...attachment, id: 999});
+  const patches = remote.patches;
+  await assert.rejects(mirrorRelease(remote.options(folder)), error => {
+    assert.match(error.message, /Unexpected or duplicate Gitee release attachment/);
+    assert.equal(mirrorFailureExitCode(error), 1);
+    return true;
+  });
+  assert.equal(remote.uploads, 4);
+  assert.equal(remote.patches, patches);
 });
 
 test('conflicting existing asset bytes are rejected without overwriting or uploading', async t => {
@@ -663,9 +754,101 @@ test('anonymous download retry policy rejects unapproved redirects and never ret
       if (mode === 'http') return new Response(null, {status: 503});
       return new Response(new ReadableStream({start(controller) {controller.error(new Error('Synthetic partial body failure'))}}));
     }});
-    await assert.rejects(http.download(`https://gitee.com/${TARGET}/attach_files/1/download/fixture.exe`, 'gitee'), /Unexpected asset download host|HTTP 503|Synthetic partial body/);
+    await assert.rejects(http.download(`https://gitee.com/${TARGET}/attach_files/1/download/fixture.exe`, 'gitee'), /Unexpected asset download host|HTTP 503|download body request failed/);
     assert.equal(calls, 1);
   }
+});
+
+test('only temporary HTTP statuses produce the coordinator exit signal and no HTTP write is replayed', async () => {
+  assert.equal(MIRROR_TEMPORARY_EXIT_CODE, 75);
+  for (const status of [302, 400, 401, 403, 404, 408, 409, 413, 422, 429, 500, 502, 503, 504, 599]) {
+    const expectedRetry = [408, 429].includes(status) || status >= 500;
+    for (const method of ['GET', 'POST', 'PATCH']) {
+      let calls = 0;
+      const http = new MirrorHttp({fetchImpl: async () => {calls++; return new Response('private body fake-gitee-token', {status})}});
+      await assert.rejects(http.api('gitee', method, '/releases/123'), error => {
+        assert.equal(isRetryableMirrorError(error), expectedRetry, `${method} HTTP ${status}`);
+        assert.equal(mirrorFailureExitCode(error), expectedRetry ? 75 : 1);
+        assert.equal(error.message, `gitee API ${method} failed (HTTP ${status})`);
+        assert.equal(error.cause, undefined);
+        return true;
+      });
+      assert.equal(calls, 1);
+    }
+    let calls = 0;
+    const http = new MirrorHttp({fetchImpl: async () => {calls++; return new Response(null, {status})}});
+    await assert.rejects(http.download(`https://gitee.com/${TARGET}/attach_files/1/download/fixture.exe`, 'gitee'), error => {
+      // A redirect without a Location header is a malformed response.
+      assert.equal(isRetryableMirrorError(error), status !== 302 && expectedRetry);
+      return true;
+    });
+    assert.equal(calls, 1);
+  }
+});
+
+test('sanitized transport errors distinguish temporary failures from certificate, configuration and unknown failures', async () => {
+  const cases = [
+    ...['ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET'].map(code => ({code, retry: true})),
+    ...[5, 6, 7, 16, 18, 28, 35, 52, 55, 56, 92, 95].map(code => ({code: 'CURL_EXIT_' + code, retry: true})),
+    ...['ERR_TLS_CERT_ALTNAME_INVALID', 'CERT_HAS_EXPIRED', 'CURL_EXIT_2', 'CURL_EXIT_23', 'CURL_EXIT_26', 'CURL_EXIT_60', 'CURL_EXIT_77', undefined].map(code => ({code, retry: false})),
+    {name: 'TimeoutError', retry: true}, {name: 'AbortError', retry: true},
+  ];
+  for (const settings of cases) {
+    let calls = 0;
+    const http = new MirrorHttp({fetchImpl: async () => {
+      calls++;
+      const error = new TypeError('https://private.invalid/?token=fake-gitee-token');
+      if (settings.name) error.name = settings.name;
+      if (settings.code) error.cause = {code: settings.code, message: 'Authorization fake-gitee-token'};
+      throw error;
+    }});
+    await assert.rejects(http.api('gitee', 'POST', '/releases'), error => {
+      assert.equal(isRetryableMirrorError(error), settings.retry, settings.code ?? settings.name ?? 'unknown TypeError');
+      assert.equal(mirrorFailureExitCode(error), settings.retry ? 75 : 1);
+      assert.ok(!error.message.includes('private.invalid') && !error.message.includes('fake-gitee-token') && !error.message.includes('Authorization'));
+      assert.equal(error.cause, undefined);
+      return true;
+    });
+    assert.equal(calls, 1);
+  }
+});
+
+test('API and public body interruptions request a complete retry without replaying reads or exposing causes', async () => {
+  for (const scope of ['api', 'download']) {
+    let calls = 0;
+    const http = new MirrorHttp({fetchImpl: async () => {
+      calls++;
+      const error = new TypeError('https://private.invalid/?token=fake-gitee-token');
+      error.cause = {code: 'UND_ERR_BODY_TIMEOUT'};
+      return new Response(new ReadableStream({start(controller) {controller.error(error)}}));
+    }});
+    const pending = scope === 'api' ? http.api('gitee', 'GET', '/releases') : http.download(`https://gitee.com/${TARGET}/attach_files/1/download/fixture.exe`, 'gitee');
+    await assert.rejects(pending, error => {
+      assert.equal(isRetryableMirrorError(error), true);
+      assert.match(error.message, /body timed out.*UND_ERR_BODY_TIMEOUT/);
+      assert.ok(!error.message.includes('private.invalid') && !error.message.includes('fake-gitee-token'));
+      assert.equal(error.cause, undefined);
+      return true;
+    });
+    assert.equal(calls, 1);
+  }
+});
+
+test('invalid JSON, oversized bodies and unapproved redirects are permanent and never acquire a retry signal', async () => {
+  for (const mode of ['json', 'size', 'redirect']) {
+    const http = new MirrorHttp({fetchImpl: async () => mode === 'json' ? new Response('invalid JSON') : mode === 'size'
+      ? new Response('small bytes', {headers: {'Content-Length': String(4 * 1024 * 1024 + 1)}})
+      : new Response(null, {status: 302, headers: {Location: 'https://evil.invalid/steal'}})});
+    await assert.rejects(mode === 'redirect' ? http.download(`https://gitee.com/${TARGET}/attach_files/1/download/fixture.exe`, 'gitee') : http.api('gitee', 'GET', '/releases'), error => {
+      assert.match(error.message, /invalid JSON|exceeds the allowed size|Unexpected asset download host/);
+      assert.equal(isRetryableMirrorError(error), false);
+      assert.equal(mirrorFailureExitCode(error), 1);
+      return true;
+    });
+  }
+  // A lookalike message or property cannot turn arbitrary validation errors into retries.
+  const forged = new Error('HTTP 503 UND_ERR_CONNECT_TIMEOUT'); forged.name = 'MirrorTemporaryError'; forged.retryable = true;
+  assert.equal(mirrorFailureExitCode(forged), 1);
 });
 
 test('real curl native multipart sends an ordinary token field and exact file bytes to an isolated loopback receiver', async t => {

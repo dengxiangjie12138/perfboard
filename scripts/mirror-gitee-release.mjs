@@ -24,8 +24,19 @@ const CURL_UPLOAD_TIMEOUT_MS = 890_000;
 const MAX_MULTIPART = MAX_EXE + 128 * 1024;
 const CURL_METRICS = '\nPERFBOARD_CURL_METRICS:';
 const CURL_METRICS_LIMIT = 512;
-const NETWORK_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET']);
+const NETWORK_CODES = new Set(['ECONNRESET', 'ECONNREFUSED', 'ECONNABORTED', 'EHOSTUNREACH', 'ENETUNREACH', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET']);
 const READ_CONNECT_CODES = new Set(['ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT']);
+const TEMPORARY_CURL_CODES = new Set([5, 6, 7, 16, 18, 28, 35, 52, 55, 56, 92, 95].map(code => 'CURL_EXIT_' + code));
+
+// A coordinator may restart the verified mirror, never replay an HTTP write.
+// Keep the retry signal typed so validation errors cannot be mistaken for a
+// network outage by matching their text or retaining an untrusted error cause.
+export const MIRROR_TEMPORARY_EXIT_CODE = 75;
+export class MirrorTemporaryError extends Error {
+  constructor(message) {super(message); this.name = 'MirrorTemporaryError'}
+}
+export function isRetryableMirrorError(error) {return error instanceof MirrorTemporaryError}
+export function mirrorFailureExitCode(error) {return isRetryableMirrorError(error) ? MIRROR_TEMPORARY_EXIT_CODE : 1}
 
 function networkFailure(context, error, timeout) {
   // Node errors can embed full URLs, headers or credentials in their message.
@@ -33,7 +44,14 @@ function networkFailure(context, error, timeout) {
   const code = [error?.code, error?.cause?.code].find(value => NETWORK_CODES.has(value) || /^CURL_EXIT_[1-9][0-9]{0,2}$/.test(value ?? ''));
   const name = ['TimeoutError', 'AbortError', 'TypeError', 'Error'].includes(error?.name) ? error.name : 'NetworkError';
   const timedOut = ['TimeoutError', 'AbortError'].includes(name) || code?.includes('TIMEOUT') || code === 'ETIMEDOUT';
-  return new Error(`${context} ${timedOut ? 'timed out' : 'request failed'} (${name}${code ? '; ' + code : ''}; request limit ${timeout / 1000}s)`);
+  const ErrorType = ['TimeoutError', 'AbortError'].includes(name) || NETWORK_CODES.has(code) || TEMPORARY_CURL_CODES.has(code) ? MirrorTemporaryError : Error;
+  return new ErrorType(`${context} ${timedOut ? 'timed out' : 'request failed'} (${name}${code ? '; ' + code : ''}; request limit ${timeout / 1000}s)`);
+}
+
+function requireHttpSuccess(response, context) {
+  if (response.ok) return;
+  const ErrorType = [408, 429].includes(response.status) || (response.status >= 500 && response.status <= 599) ? MirrorTemporaryError : Error;
+  throw new ErrorType(`${context} failed (HTTP ${response.status})`);
 }
 
 function requireValue(condition, message) {if (!condition) throw new Error(message)}
@@ -73,15 +91,20 @@ function stableGiteeUrl(asset, filename) {
   return `https://gitee.com/${TARGET}/attach_files/${asset.id}/download/${encodeURIComponent(filename)}`;
 }
 
-async function responseBytes(response, limit) {
+async function responseBytes(response, limit, context, timeout) {
   const length = Number(response.headers.get('content-length'));
   requireValue(!Number.isFinite(length) || length <= limit, 'Remote response exceeds the allowed size');
   const chunks = [];
   let count = 0;
-  for await (const chunk of response.body ?? []) {
-    count += chunk.length;
-    requireValue(count <= limit, 'Remote response exceeds the allowed size');
-    chunks.push(Buffer.from(chunk));
+  try {
+    for await (const chunk of response.body ?? []) {
+      count += chunk.length;
+      requireValue(count <= limit, 'Remote response exceeds the allowed size');
+      chunks.push(Buffer.from(chunk));
+    }
+  } catch (error) {
+    if (error.message === 'Remote response exceeds the allowed size') throw error;
+    throw networkFailure(context, error, timeout);
   }
   return Buffer.concat(chunks);
 }
@@ -343,9 +366,9 @@ export class MirrorHttp {
     const response = await this.requestWithReadRetries({provider, scope: 'API', method, url, timeout, transport,
       options: {headers, body, redirect: 'manual'}});
     if (allowMissing && response.status === 404 && method === 'GET') return null;
-    requireValue(response.ok, `${provider} API ${method} failed (HTTP ${response.status})`);
+    requireHttpSuccess(response, `${provider} API ${method}`);
     if (response.status === 204) return null;
-    const bytes = await responseBytes(response, MAX_JSON);
+    const bytes = await responseBytes(response, MAX_JSON, `${provider} API ${method} body`, timeout);
     try {return JSON.parse(bytes.toString('utf8'))} catch {throw new Error(`${provider} returned invalid JSON`)}
   }
   async download(value, provider, limit = MAX_EXE) {
@@ -366,8 +389,8 @@ export class MirrorHttp {
         noSecrets(url.href, [this.githubToken, this.giteeToken]);
         continue;
       }
-      requireValue(response.ok, `${provider} public asset download failed (HTTP ${response.status})`);
-      return responseBytes(response, limit);
+      requireHttpSuccess(response, `${provider} public asset download`);
+      return responseBytes(response, limit, `${provider} public asset download body`, API_TIMEOUT_MS);
     }
     throw new Error('Too many asset download redirects');
   }
@@ -566,7 +589,7 @@ async function main(args) {
   console.log(JSON.stringify(await mirrorRelease(options), null, 2));
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
-  main(process.argv.slice(2)).catch(error => {console.error(`Gitee mirror failed: ${error.message}`); process.exitCode = 1});
+  main(process.argv.slice(2)).catch(error => {console.error(`Gitee mirror failed: ${error.message}`); process.exitCode = mirrorFailureExitCode(error)});
 }
 
 export {githubRelease as readVerifiedGithubRelease, targetTag as verifyGiteeTag};
