@@ -2,6 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {Database, FolderOpen, Archive, RefreshCw, Clock} from 'lucide-react';
 import {api, errorMessage, native, pickDirectory, pickBackup} from '../../services/api';
 import {flushAll} from '../../services/saveRegistry';
+import {useSaveShortcut} from '../../services/useSaveShortcut';
 import {useData} from '../../state/DataContext';
 import {Heading} from '../../components/Common';
 import {formatDisplayPath} from '../../utils/displayPath';
@@ -20,13 +21,15 @@ export function RepositorySizeBadge({statistics, loading, error}: {
 }
 export function AutomaticBackupForm({status, draft, loading, busy, error, onDraft, onChoose, onSave, onRetry}: {
   status: AutoBackupStatus | null; draft: AutoBackupSettings; loading: boolean; busy: boolean; error: string | null;
-  onDraft: (settings: AutoBackupSettings) => void; onChoose: () => void; onSave: () => void; onRetry: () => void;
+  onDraft: (settings: AutoBackupSettings) => void; onChoose: () => void; onSave: () => void | Promise<void>; onRetry: () => void;
 }) {
   const changed = status !== null && !autoBackupSettingsEqual(draft, status.settings);
   const disabled = !native || loading || busy || !status;
   const invalid = !isDailyTime(draft.time) || (draft.enabled && !draft.parentDirectory?.trim());
   const result = status?.lastResult ?? null;
-  return <section className="card section"><div className="card-title"><h2><Clock size={19}/> 自动备份</h2>
+  const saveScope = useRef<HTMLElement | null>(null);
+  useSaveShortcut(saveScope, onSave, {enabled: !disabled && changed && !invalid});
+  return <section ref={saveScope} className="card section"><div className="card-title"><h2><Clock size={19}/> 自动备份</h2>
     <span className="tag">{loading ? '正在读取…' : status ? (status.settings.enabled ? '已开启' : '已关闭') : '未读取'}</span></div>
     <label className="setting-toggle"><input data-testid="auto-backup-enabled" type="checkbox"
       checked={draft.enabled} disabled={disabled} onChange={event => onDraft({...draft, enabled: event.currentTarget.checked})}/>
@@ -40,7 +43,7 @@ export function AutomaticBackupForm({status, draft, loading, busy, error, onDraf
     <p className="help">包含数据库和附件，只保留本功能创建的最近 5 份自动备份。手动备份保留原样。</p>
     {draft.enabled && !draft.parentDirectory && <p className="help">请先选择备份父目录。</p>}
     {!isDailyTime(draft.time) && <p className="error-text" role="alert">请选择有效的每天执行时间。</p>}
-    <div className="button-row section"><button className="primary" data-testid="auto-backup-save"
+    <div className="button-row section"><button className="primary" title="保存自动备份设置 (Ctrl+S)" data-testid="auto-backup-save"
       disabled={disabled || !changed || invalid} onClick={onSave}>{busy ? '正在保存…' : '保存自动备份设置'}</button>
       <button className="small" disabled={!native || loading || busy} onClick={onRetry}><RefreshCw size={14}/> 读取状态</button></div>
     <p className="auto-backup-saved" role="status">{changed ? '有未保存的修改。' : status ? '当前设置已保存。' : '等待读取已保存的设置。'}
@@ -102,7 +105,7 @@ function AutomaticBackupSection() {
     finally {saveLock.current = false; if (mounted.current) setBusy(false)}
   }
   return <AutomaticBackupForm status={status} draft={draft} loading={loading} busy={busy} error={error}
-    onDraft={setDraft} onChoose={() => void choose()} onSave={() => void save()} onRetry={() => void retry()}/>;
+    onDraft={setDraft} onChoose={() => void choose()} onSave={save} onRetry={() => void retry()}/>;
 }
 
 export function RepositoryPage() {

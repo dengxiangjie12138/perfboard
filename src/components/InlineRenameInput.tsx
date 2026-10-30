@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import {useSaveShortcut} from '../services/useSaveShortcut';
 
 export interface InlineRenameInputProps {
  initialValue: string;
@@ -14,6 +15,7 @@ export function InlineRenameInput({ initialValue, label, maxLength = 200, onComm
  const [saving, setSaving] = useState(false);
  const [error, setError] = useState('');
  const input = useRef<HTMLInputElement>(null);
+ const saveScope = useRef<HTMLSpanElement>(null);
  const composing = useRef(false);
  const pending = useRef(false);
  const finished = useRef(false);
@@ -62,8 +64,9 @@ export function InlineRenameInput({ initialValue, label, maxLength = 200, onComm
   }
  };
 
- return <span className="inline-rename" aria-busy={saving}>
-  <input ref={input} type="text" className="inline-rename-input" aria-label={label} maxLength={maxLength} value={value} disabled={saving} autoComplete="off" spellCheck={false} aria-invalid={error ? true : undefined} aria-describedby={error ? errorId : undefined}
+ useSaveShortcut(saveScope, () => {if (!composing.current) return commit();}, {enabled: !saving});
+ return <span ref={saveScope} className="inline-rename" aria-busy={saving}>
+  <input ref={input} type="text" className="inline-rename-input" title="保存名称 (Ctrl+S)" aria-label={label} maxLength={maxLength} value={value} disabled={saving} autoComplete="off" spellCheck={false} aria-invalid={error ? true : undefined} aria-describedby={error ? errorId : undefined}
    onChange={event => { if (!pending.current && !finished.current) { setValue(event.currentTarget.value); setError(''); } }}
    onCompositionStart={() => { composing.current = true; }}
    onCompositionEnd={() => { composing.current = false; }}

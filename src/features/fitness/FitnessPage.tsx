@@ -4,6 +4,7 @@ import './fitness.css';
 import '../../components/enable-switch.css';
 import {RowLimitedTable} from '../../components/RowLimitedTable';
 import {registerFlush} from '../../services/saveRegistry';
+import {useSaveShortcut} from '../../services/useSaveShortcut';
 import {AttentionSettings} from '../standing-reminder/AttentionSettings';
 const outcomes: Record<FitnessOutcome, string> = { complete: '完成', later: '稍后', skip: '跳过' };
 export function FitnessPage() {
@@ -13,6 +14,8 @@ export function FitnessPage() {
   useEffect(() => { if (state && !dirty) { setSettings({ ...state.settings }); setPool(state.pool.map(item => ({ ...item }))); } }, [state, dirty]);
   const latest=useRef({dirty,settings,pool}); latest.current={dirty,settings,pool};
   const saveTask=useRef<Promise<boolean>|null>(null);
+  const form=useRef<HTMLFormElement>(null);
+  useSaveShortcut(form,async()=>{if(form.current?.reportValidity())await save()},{enabled:desktop&&!!state&&!busy,primary:true});
   async function persist(){
     if(saveTask.current)return saveTask.current;
     const current=latest.current;if(!current.dirty)return true;
@@ -42,7 +45,7 @@ export function FitnessPage() {
     </div>
     {pending && <div className="fitness-reminder" role="status"><div><small>{pending.started ? '已开始运动，等待确认完成' : pending.snoozeActiveRemainingMs > 0 ? '已选择稍后' : '本轮随机动作'}</small><h3>{pending.exercise.name}</h3><p>{pending.exercise.instructions || '按照你自己设定的动作要求完成。'}</p></div>
       {pending.snoozeActiveRemainingMs === 0 ? <div className="button-row"><button className="primary" disabled={busy || !desktop} onClick={() => void (pending.started ? respond('complete') : startExercise())}>{pending.started ? '已完成' : '开始运动'}</button><button disabled={busy || !desktop} onClick={() => void respond('later')}>稍后 {state.settings.snoozeMs / 60_000} 分钟</button><button disabled={busy || !desktop} onClick={() => void respond('skip')}>跳过</button><button disabled={busy || !desktop || !running || pending.started} onClick={() => void act({ type: 'show' })}>显示提醒</button></div> : <p className="muted">再累计 {fitnessDuration(pending.snoozeActiveRemainingMs)} 活动时间后提醒，动作保持不变。</p>}</div>}
-    <form className="card fitness-settings" onSubmit={event => { event.preventDefault(); void save(); }}>
+    <form ref={form} className="card fitness-settings" onSubmit={event => { event.preventDefault(); void save(); }}>
       <div className="card-title"><h3>活动与提醒设置</h3><label className="fitness-switch enable-switch"><input role="switch" type="checkbox" checked={settings.enabled} disabled={!desktop || busy} onChange={event => { setSettings(current => ({ ...current, enabled: event.target.checked })); setDirty(true); }} />启用工作与健身（保存设置后生效）</label></div>
       <fieldset disabled={!desktop || busy} className="fitness-fields">
         <label>活动累计阈值<span><input aria-label="活动累计阈值（分钟）" type="number" min="1" max="1440" step="1" required value={settings.intervalMs / 60_000} onChange={event => { setSettings(current => ({ ...current, intervalMs: Math.round(Number(event.target.value) * 60_000) })); setDirty(true); }} />分钟</span></label>
@@ -56,7 +59,7 @@ export function FitnessPage() {
         {pool.map(item => <div className="fitness-exercise" key={item.id}><label className="fitness-pool-choice"><input type="checkbox" checked={item.selected} onChange={event => updateExercise(item.id, { selected: event.target.checked })} /><span>加入随机</span></label><label>动作名称<input aria-label={'动作名称 ' + item.name} required maxLength={80} value={item.name} onChange={event => updateExercise(item.id, { name: event.target.value })} /></label><label>个人要求<input aria-label={'动作要求 ' + item.name} maxLength={240} value={item.instructions} placeholder="次数、时长或自己的动作备注（可留空）" onChange={event => updateExercise(item.id, { instructions: event.target.value })} /></label><button type="button" className="small" onClick={() => { setPool(current => current.filter(row => row.id !== item.id)); setDirty(true); }}>删除</button></div>)}
         <button type="button" className="small" disabled={pool.length >= 50} onClick={() => { setPool(current => [...current, { id: crypto.randomUUID(), name: '', instructions: '', selected: false }]); setDirty(true); }}>添加动作</button>
       </fieldset>
-      <div className="fitness-settings-actions"><button type="submit" className="primary" disabled={!dirty || busy || !desktop}>{busy ? '保存中…' : '保存设置'}</button>{dirty && <button type="button" disabled={busy} onClick={() => setDirty(false)}>撤销未保存设置</button>}<span className="muted">{dirty ? '设置尚未保存' : '设置已保存到本机独立配置'}</span></div>
+      <div className="fitness-settings-actions"><button type="submit" className="primary" title="保存设置 (Ctrl+S)" disabled={!dirty || busy || !desktop}>{busy ? '保存中…' : '保存设置'}</button>{dirty && <button type="button" disabled={busy} onClick={() => setDirty(false)}>撤销未保存设置</button>}<span className="muted">{dirty ? '设置尚未保存' : '设置已保存到本机独立配置'}</span></div>
     </form>
     <AttentionSettings/>
     <div className="fitness-info">久坐与健身共用一个活动提醒窗口，首次显示不夺焦点；未处理时可在原窗口升级为增强提醒。开始运动后保留进行中状态，副屏仅显示必要遮罩。输入来源只保留活动标记和聚合时间，不记录键值、文本或鼠标轨迹。</div>

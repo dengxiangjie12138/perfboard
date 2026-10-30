@@ -5,9 +5,9 @@ import {versionHistory} from './versionHistory';
 import {currentVersion} from '../../services/version';
 
 it('keeps the prior release and lists update support under the new application version', () => {
-  expect(versionHistory.map(entry => entry.version)).toEqual([currentVersion, '0.1.2', '0.1.1', '0.1.0']);
-  expect(versionHistory[0].groups.find(group => group.label === '新增')?.items.join('')).toContain('Gitee');
-  expect(versionHistory[3].groups.map(group => group.label)).toEqual(['新增', '调整', '修复', '移除']);
+  expect(versionHistory.map(entry => entry.version)).toEqual([currentVersion, '0.1.3', '0.1.2', '0.1.1', '0.1.0']);
+  expect(versionHistory[0].groups.find(group => group.label === '新增')?.items.join('')).toContain('分压');
+  expect(versionHistory[4].groups.map(group => group.label)).toEqual(['新增', '调整', '修复', '移除']);
 });
 it('starts history collapsed and marks only the actual current version', () => {
   const html = renderToStaticMarkup(<VersionHistoryPage/>);

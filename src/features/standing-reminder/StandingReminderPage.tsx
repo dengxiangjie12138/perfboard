@@ -1,4 +1,5 @@
-import {useEffect,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
+import {useSaveShortcut} from '../../services/useSaveShortcut';
 import { countdown, useReminder } from './reminderApi';
 import './standing-reminder.css';
 import '../../components/enable-switch.css';
@@ -10,14 +11,16 @@ export default function StandingReminderPage() {
   const {state,error,act,configure} = useReminder();
   const [work,setWork] = useState(45), [rest,setRest] = useState(3), [idle,setIdle] = useState(60);
   const [dirty,setDirty] = useState(false), [busy,setBusy] = useState(false);
+  const form=useRef<HTMLFormElement>(null),saving=useRef(false);
+  useSaveShortcut(form,async()=>{if(form.current?.reportValidity())await durations()},{enabled:!!state&&!busy,primary:true});
   useEffect(()=>{
     if(state&&!dirty){setWork(state.settings.workSeconds/60);setRest(state.settings.restSeconds/60);setIdle(state.settings.idleSeconds)}
   },[state,dirty]);
   async function durations() {
-    if(!state||busy)return;
-    setBusy(true);
-    const ok=await configure({workSeconds:Math.round(work*60),restSeconds:Math.round(rest*60),idleSeconds:Math.round(idle)});
-    setBusy(false);if(ok)setDirty(false);
+    if(!state||busy||saving.current||!dirty)return;
+    saving.current=true;setBusy(true);
+    try{const ok=await configure({workSeconds:Math.round(work*60),restSeconds:Math.round(rest*60),idleSeconds:Math.round(idle)});if(ok)setDirty(false);}
+    finally{saving.current=false;setBusy(false);}
   }
   if(!state)return <div className="standing-page"><h2>久坐提醒</h2><p role="status">{error||'正在读取后台状态…'}</p></div>;
   const resting=state.mode==='resting'||state.mode==='systemRest';
@@ -44,7 +47,7 @@ export default function StandingReminderPage() {
         {state.due&&<button disabled={!enabled||state.snoozeUsed} onClick={()=>void act('snooze')}>稍后 5 分钟</button>}
       </div>
     </div>
-    <form className="standing-settings" onSubmit={e=>{e.preventDefault();void durations()}}>
+    <form ref={form} className="standing-settings" onSubmit={e=>{e.preventDefault();void durations()}}>
       <h3>时长设置</h3>
       <div className="standing-fields">
         <label>工作时长 <span><input aria-label="工作时长（分钟）" type="number" min="1" max="1440" step="1" value={work} onChange={e=>{setWork(Number(e.target.value));setDirty(true)}}/>分钟</span></label>
@@ -53,7 +56,7 @@ export default function StandingReminderPage() {
       </div>
       <p>确认期仍计入工作，之后才开始连续休息。按当前设置，自动离开满 {state.settings.idleSeconds+state.settings.restSeconds} 秒可清零；短暂离开保留工作累计，零碎休息不累加。</p>
       {state.pendingDurations&&<p className="standing-info">新时长已保存，将在本轮连续休息完成后的下一轮生效。当前轮：工作 {state.activeDurations.workSeconds/60} 分钟 / 休息 {state.activeDurations.restSeconds/60} 分钟。</p>}
-      <button type="submit" disabled={!dirty||busy}>{busy?'保存中…':'保存时长'}</button>
+      <button type="submit" title="保存时长 (Ctrl+S)" disabled={!dirty||busy}>{busy?'保存中…':'保存时长'}</button>
     </form>
     <div className="standing-options">
       <label><input type="checkbox" checked={state.settings.sound} onChange={e=>void configure({sound:e.target.checked})}/>提示声音</label>

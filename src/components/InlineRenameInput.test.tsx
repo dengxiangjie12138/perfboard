@@ -2,6 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChangeEvent, CompositionEvent, FocusEvent, InputHTMLAttributes, KeyboardEvent, ReactElement, RefObject } from 'react';
 import { InlineRenameInput, type InlineRenameInputProps } from './InlineRenameInput';
 
+const shortcut = vi.hoisted(() => ({save: undefined as undefined | (() => unknown), enabled: false}));
+vi.mock('../services/useSaveShortcut', () => ({useSaveShortcut: (_scope: unknown, save: () => unknown, options: {enabled: boolean}) => {
+ shortcut.save = save; shortcut.enabled = options.enabled;
+}}));
+
 // This suite drives the real component handlers without a DOM dependency.
 // Native WebView focus and IME ordering still require the Windows acceptance run.
 const hooks = vi.hoisted(() => ({
@@ -186,4 +191,22 @@ describe('shared inline rename input', () => {
   expect(onCommit.mock.calls).toEqual([['重复名'], ['可用名']]);
   expect(view.props.onCancel).not.toHaveBeenCalled();
  });
+});
+
+it('Ctrl+S commits the latest inline name through the existing guarded commit path', async () => {
+ let resolve!: () => void;
+ const onCommit = vi.fn(() => new Promise<void>(done => { resolve = done; }));
+ const view = createView({onCommit});
+ view.render().input.onChange?.(change('  快捷键刚输入的名称  '));
+ const changed = view.render();
+ expect(changed.input.title).toBe('保存名称 (Ctrl+S)');
+ expect(shortcut.enabled).toBe(true);
+ const saving = shortcut.save!();
+ view.render();
+ expect(shortcut.enabled).toBe(false);
+ await shortcut.save!();
+ expect(onCommit).toHaveBeenCalledExactlyOnceWith('快捷键刚输入的名称');
+ expect(view.props.onCancel).not.toHaveBeenCalled();
+ resolve(); await saving;
+ expect(view.props.onCancel).not.toHaveBeenCalled();
 });

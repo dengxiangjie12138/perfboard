@@ -6,6 +6,7 @@ import {SheetEditor,SheetPreview} from './sheetView';
 import {exportTransformerDesignPdf} from './pdf';
 import {TransformerSaveSession} from './saveSession';
 import {SaveCancelledError,type FlushContext} from '../../services/saveRegistry';
+import {useSaveShortcut} from '../../services/useSaveShortcut';
 import {readViewMemory,writeViewMemory} from '../../services/viewMemory';
 import {restoreDesignView,type DesignViewMemory} from './viewMemory';
 import './transformer-design.css';
@@ -31,6 +32,7 @@ export function TransformerDesignTool({selectedId,memoryScope,api,pdfOptions={},
  const [session]=useState(()=>new TransformerSaveSession());
  const draftRef=useRef(draft),recordRef=useRef(record),dirtyRef=useRef(dirty),busyRef=useRef(''),pendingRef=useRef(pending);
  const previewPanel=useRef<HTMLDivElement>(null);
+ const saveScope=useRef<HTMLDivElement>(null),pendingSaveScope=useRef<HTMLDivElement>(null);
  const baseline=useRef(copyDocument(draft));
  const memoryReady=useRef(false),activeRef=useRef(false);
  const remember=()=>{
@@ -103,12 +105,15 @@ export function TransformerDesignTool({selectedId,memoryScope,api,pdfOptions={},
  };
  const importDesign=()=>navigate(()=>void run('预览导入',async()=>{if(!api)throw new Error('原生接口尚未连接。');const p=await api.previewImport();if(p){setPreview(p);setCandidateId('');}}));
  const confirmImport=()=>void run('导入所选记录',async()=>{if(!api||!preview||!candidateId)return;const r=await api.confirmImport({token:preview.token,candidateId,confirmed:true});setPreview(null);install(r.document,r,false);await refresh();});
+ const saveRecord=()=>run('保存',async()=>{await persist();});
+ useSaveShortcut(saveScope,saveRecord,{primary:true,enabled:!!api&&active&&!busy});
+ useSaveShortcut(pendingSaveScope,()=>leave(true),{enabled:!!api&&!busy});
  const preserved=draft.windingSteps.length||draft.tests.length||draft.images.length||draft.source;
- return <div className="transformer-design-tool td-production-tool">
+ return <div ref={saveScope} className="transformer-design-tool td-production-tool">
   <header className="td-topbar"><div><h2>变压器制作单</h2><p>填入已计算好的参数，整理绕制要求，导出交给厂家。</p></div><button type="button" disabled={!!busy} onClick={()=>navigate(()=>install(createSheetExample(),null,true))}>查看虚构示例</button></header>
   <div className="td-sheet-toolbar"><label>仓库记录 <select aria-label="选择已保存制作单" value={record?.id||''} disabled={!!busy} onChange={e=>{const id=e.target.value;if(id)navigate(()=>void openRecord(id));}}><option value="">选择已保存记录</option>{items.map(i=><option key={i.id} value={i.id}>{i.title||'未命名制作单'}{i.exampleFlag?' · 示例':''}</option>)}</select></label>
    <button type="button" disabled={!!busy} onClick={()=>navigate(()=>install(createSheetDesign(),null,true))}>新建</button>
-   <button type="button" className="td-primary" disabled={!!busy||!active||!api} onClick={()=>void run('保存',async()=>{await persist();})}>保存记录</button>
+   <button type="button" className="td-primary" title="保存记录 (Ctrl+S)" disabled={!!busy||!active||!api} onClick={()=>void saveRecord()}>保存记录</button>
    <span>{dirty?'未保存修改':record?'已保存':active?'未保存草稿':'未开始编辑'}</span>
    <button type="button" disabled={!!busy||!api} onClick={importDesign}>导入 JSON / Excel</button>
    {active&&<><button type="button" disabled={!!busy} onClick={()=>navigate(()=>{setActive(false);activeRef.current=false;dirtyRef.current=false;setDirty(false);remember();})}>结束编辑</button>
@@ -128,7 +133,7 @@ export function TransformerDesignTool({selectedId,memoryScope,api,pdfOptions={},
    </fieldset>
    <div ref={previewPanel} className="td-sheet-preview-panel" aria-label="制作单预览"><div className="td-section-heading"><h3>制作单预览</h3><label><input type="checkbox" disabled={!!busy} checked={draft.productionSheet!.showDiagram} onChange={e=>update({productionSheet:{...draft.productionSheet!,showDiagram:e.target.checked}})}/> 包含连接示意图</label></div><SheetPreview document={draft}/></div>
    </div>}
-  {pending&&<Dialog title="当前有未保存修改" onClose={cancel}><p>保存并离开会检查必填项目；放弃修改只舍弃本次草稿，不会删除已保存记录。</p>{error&&<p className="td-error" role="alert">{error}</p>}<div className="td-actions"><button type="button" disabled={!!busy} onClick={cancel}>继续编辑</button><button type="button" disabled={!!busy} onClick={()=>void leave(false)}>放弃修改并离开</button><button type="button" disabled={!!busy||!api} onClick={()=>void leave(true)}>保存并离开</button></div></Dialog>}
+  {pending&&<Dialog title="当前有未保存修改" onClose={cancel}><div ref={pendingSaveScope}><p>保存并离开会检查必填项目；放弃修改只舍弃本次草稿，不会删除已保存记录。</p>{error&&<p className="td-error" role="alert">{error}</p>}<div className="td-actions"><button type="button" disabled={!!busy} onClick={cancel}>继续编辑</button><button type="button" disabled={!!busy} onClick={()=>void leave(false)}>放弃修改并离开</button><button type="button" disabled={!!busy||!api} title="保存并离开 (Ctrl+S)" onClick={()=>void leave(true)}>保存并离开</button></div></div></Dialog>}
   {preview&&<Dialog title="导入预览 · 只确认所选方案" onClose={()=>setPreview(null)}><p>{preview.fileName}</p>{preview.warnings.map((v,i)=><p key={i} className="td-warning">{v}</p>)}<select aria-label="选择导入方案" value={candidateId} onChange={e=>setCandidateId(e.target.value)}><option value="">请选择</option>{preview.candidates.map(c=><option key={c.candidateId} value={c.candidateId}>{c.title}</option>)}</select>{candidateId&&<pre className="td-json-preview">{JSON.stringify(preview.candidates.find(c=>c.candidateId===candidateId),null,2)}</pre>}<div className="td-actions"><button type="button" disabled={!!busy} onClick={()=>setPreview(null)}>取消</button><button type="button" disabled={!!busy||!candidateId} onClick={confirmImport}>确认导入所选方案</button></div></Dialog>}
   {history&&<Dialog title="历史快照（只读）" onClose={()=>setHistory(null)}>{history.map(r=><details key={r.revision}><summary>修订 {r.revision} · {r.updatedAt}</summary><pre className="td-json-preview">{JSON.stringify(r.document,null,2)}</pre><button type="button" onClick={()=>{setHistory(null);navigate(()=>install({...copyDocument(r.document),designNo:createSheetDesign().designNo,status:'draft'},null,true));}}>复制为新记录</button></details>)}</Dialog>}
  </div>;

@@ -5,6 +5,16 @@ export interface VersionHistoryEntry {version: string; dateRange: string; groups
 // Historical facts: CHANGELOG.md / README.md at dbefa503, and the corresponding
 // Git records from the initial 2026-10-01 app through dbefa503 on 2026-10-03.
 export const versionHistory: readonly VersionHistoryEntry[] = [{
+  version: '0.1.4',
+  dateRange: '2026-10-30',
+  groups: [
+    {label: '新增', items: [
+      '分压计算器支持在供电电压、上电阻、下电阻和中点电压中选择一个求解项，输入其余三项实时反算，并记住选择和参数。',
+      '编辑页面统一支持 Ctrl+S 保存当前编辑对象，主窗口、独立窗口和保存弹窗均可使用，输入框内也生效。',
+    ]},
+    {label: '调整', items: ['快捷保存复用原保存校验与错误提示，保存中避免重复提交；自动保存页面可立即保存，保留原自动保存设置。']},
+  ],
+}, {
   version: '0.1.3',
   dateRange: '2026-10-30',
   groups: [

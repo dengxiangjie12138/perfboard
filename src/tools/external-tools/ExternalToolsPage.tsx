@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useSaveShortcut } from '../../services/useSaveShortcut';
 import { Heading } from '../../components/Common';
 import { errorMessage, native, pickExternalToolExecutable, type ExternalTool, type ExternalToolInput } from '../../services/api';
 import { useData } from '../../state/DataContext';
@@ -12,22 +13,27 @@ export function ExternalToolsPage({ selectedId }: { selectedId?: string }) {
   const [draft, setDraft] = useState<ExternalToolInput | null>(null);
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const editorRef = useRef<HTMLFormElement | null>(null), saveLock = useRef(false);
   const selectedRef = useRef<HTMLLIElement | null>(null);
   const selected = selectedExternalTool(tools, selectedId);
   const previousRepository = useRef(repo.path);
   useEffect(() => { if (selected) selectedRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, [selected]);
   useEffect(() => { if (previousRepository.current !== repo.path || !repo.ready) { previousRepository.current = repo.path; setDraft(null); setNotice(''); } }, [repo.path, repo.ready]);
   const disabled = busy || loading || !native || !repo.ready;
+  useSaveShortcut(editorRef, () => saveDraft(), {enabled: !!draft && !disabled, primary: true});
   async function choose() {
     try { const path = await pickExternalToolExecutable(); if (path) setDraft(value => value ? { ...value, path } : value); }
     catch (e) { setNotice(errorMessage(e)); }
   }
-  async function submit(e: FormEvent) {
-    e.preventDefault(); if (!draft) return;
+  async function submit(e: FormEvent) {e.preventDefault(); await saveDraft()}
+  async function saveDraft() {
+    if (!draft || disabled || saveLock.current || !editorRef.current?.reportValidity()) return;
+    if (!draft.name.trim() || !draft.path.trim() || !draft.description.trim()) {setNotice('请填写工具名称、本机 EXE 路径和应用介绍。'); return}
+    saveLock.current = true;
     setBusy(true); setNotice('');
     try { await save(draft); setDraft(null); setNotice('工具已保存到当前仓库，可按名称和应用介绍搜索。'); }
     catch (e) { setNotice(errorMessage(e)); }
-    finally { setBusy(false); }
+    finally {saveLock.current = false; setBusy(false);}
   }
   async function start(tool: ExternalTool) {
     setBusy(true); setNotice('');
@@ -49,13 +55,13 @@ export function ExternalToolsPage({ selectedId }: { selectedId?: string }) {
     {error && <p className="error-text" role="alert">{error}</p>}
     {notice && <p className="external-tools-notice" role="status">{notice}</p>}
     {repo.ready && selectedId && !loading && !selected && <p className="error-text" data-testid="external-tools-missing" role="status">所选工具在当前仓库中不存在，请重新选择。</p>}
-    {repo.ready && draft && <form className="external-tools-editor" onSubmit={e => void submit(e)}>
+    {repo.ready && draft && <form ref={editorRef} className="external-tools-editor" onSubmit={e => void submit(e)}>
       <h2>{draft.id ? '编辑工具' : '添加工具'}</h2>
       <label>工具名称<input data-testid="external-tools-name" autoFocus required maxLength={100} value={draft.name} disabled={disabled} onChange={e => setDraft({ ...draft, name: e.target.value })} /></label>
       <label>本机 EXE 路径<div className="external-tools-path-row"><input data-testid="external-tools-path" required value={draft.path} disabled={disabled} onChange={e => setDraft({ ...draft, path: e.target.value })} placeholder="选择程序安装目录中的 EXE 文件" /><button type="button" disabled={disabled} onClick={() => void choose()}>重新选择 EXE</button></div></label>
       <label>应用介绍 <span className="muted">用于搜索</span><textarea data-testid="external-tools-description" required maxLength={4000} rows={3} value={draft.description} disabled={disabled} onChange={e => setDraft({ ...draft, description: e.target.value })} placeholder="例如：串口调试、数据收发或硬件通信测试" /></label>
       <p className="help">迁移后程序路径可能失效，可在此重新选择。仅点击“启动”才会运行程序。</p>
-      <div className="button-row"><button className="primary" disabled={disabled || !draft.name.trim() || !draft.description.trim() || !draft.path} type="submit">保存工具</button><button type="button" disabled={busy} onClick={() => setDraft(null)}>取消</button></div>
+      <div className="button-row"><button className="primary" title="保存工具 (Ctrl+S)" disabled={disabled || !draft.name.trim() || !draft.description.trim() || !draft.path.trim()} type="submit">保存工具</button><button type="button" disabled={busy} onClick={() => setDraft(null)}>取消</button></div>
     </form>}
     {repo.ready && !loading && !tools.length && !error && <div className="empty-state">还没有外部工具。添加本机应用后，可通过搜索找到并启动。</div>}
     {repo.ready && <ul className="external-tools-list" data-testid="external-tools-list">
