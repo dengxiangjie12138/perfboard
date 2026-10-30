@@ -82,7 +82,8 @@ export async function probeUpload({tag, sourceCommit, resultFile, publicKey, git
   const expected = {tag, sourceCommit, marker, name: `Perfboard upload probe ${tag}`};
   const boundedUpload = (url, options) => (uploadImpl ?? uploadGiteeCurl)(url,
     {...options, signal: AbortSignal.timeout(PROBE_TRANSFER_TIMEOUT_MS)}, {ipv4: true, timeoutMs: PROBE_CURL_TIMEOUT_MS, nativeMultipart: true});
-  const http = new MirrorHttp({fetchImpl, uploadImpl: boundedUpload, githubToken, giteeToken, onProgress});
+  const http = new MirrorHttp({fetchImpl, uploadImpl: boundedUpload, githubToken, giteeToken, onProgress,
+    uploadTimeoutMs: PROBE_TRANSFER_TIMEOUT_MS});
   let id = null, attempted = false, uploadVerified = false, failure = null;
   try {
     const existing = await http.api('gitee', 'GET', `/releases/tags/${tag}`, undefined, true);

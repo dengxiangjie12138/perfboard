@@ -63,7 +63,9 @@ node --test --test-isolation=none scripts/tests/mirror-gitee-release.node-test.m
 
 Release 附件独立于 Git 历史。镜像脚本读取正式 GitHub Release，校验安装 EXE、更新签名、清单与校验文件，再上传或复用 Gitee 对应附件。签名密钥不参与镜像任务；安装包与签名保持原样，镜像清单使用验证后的 Gitee 稳定下载地址，不保存会过期的临时 CDN 签名链接。
 
-正式上传默认使用已验证的 curl 原生 multipart、IPv4，curl 期限 590 秒、外层期限 600 秒。令牌只通过 stdin 作为普通表单字段传入；临时文件仅包含已验证的公开附件，操作结束即清理。2026-10-30 的[真实云端隔离验证](https://github.com/dengxiangjie12138/perfboard/actions/runs/40924742555)已上传约 28.65 MB 安装包，获得 HTTP 201，公开下载的哈希及签名一致，随后确认临时 Release 和标签均已移除。
+正式上传默认使用已验证的 curl 原生 multipart、IPv4，curl 期限 890 秒、外层期限 900 秒（15 分钟），元数据仍为 180 秒。令牌只通过 stdin 作为普通表单字段传入；临时文件仅包含已验证的公开附件，操作结束即清理。2026-10-30 的[真实云端隔离验证](https://github.com/dengxiangjie12138/perfboard/actions/runs/40924742555)已上传约 28.65 MB 安装包，获得 HTTP 201，公开下载的哈希及签名一致，随后确认临时 Release 和标签均已移除。
+
+正式期限按实测慢链路调整：0.1.4 首次同步在 590 秒时已发送约 26.74 MB，达到 28.67 MB 安装包的约 93%，仍在传输而非静止等待。因此将正式上传窗口扩展至 15 分钟，保留 curl 比外层提前 10 秒结束的边界；不自动重复上传 POST。隔离探测仍固定为外层 600 秒、curl 590 秒，不随正式期限扩大。
 
 **`gitee-updates` 是专用更新索引分支，只有 JSON 文件，不含程序源码或数据库。** 其中：
 

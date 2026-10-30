@@ -19,8 +19,8 @@ const MAX_EXE = 100_000_000;
 const MAX_JSON = 4 * 1024 * 1024;
 const MINIMUM = [0, 1, 1];
 const API_TIMEOUT_MS = 180_000;
-const UPLOAD_TIMEOUT_MS = 600_000;
-const CURL_UPLOAD_TIMEOUT_MS = 590_000;
+const UPLOAD_TIMEOUT_MS = 900_000;
+const CURL_UPLOAD_TIMEOUT_MS = 890_000;
 const MAX_MULTIPART = MAX_EXE + 128 * 1024;
 const CURL_METRICS = '\nPERFBOARD_CURL_METRICS:';
 const CURL_METRICS_LIMIT = 512;
@@ -300,12 +300,14 @@ export async function uploadGiteeCurl(value, options, {spawnImpl = spawnProcess,
 }
 
 export class MirrorHttp {
-  constructor({fetchImpl = globalThis.fetch, uploadImpl = uploadGiteeCurl, githubToken, giteeToken, onProgress = () => {}} = {}) {
+  constructor({fetchImpl = globalThis.fetch, uploadImpl = uploadGiteeCurl, githubToken, giteeToken, onProgress = () => {}, uploadTimeoutMs = UPLOAD_TIMEOUT_MS} = {}) {
+    requireValue(Number.isInteger(uploadTimeoutMs) && uploadTimeoutMs >= 1000 && uploadTimeoutMs <= UPLOAD_TIMEOUT_MS, 'Invalid bounded attachment deadline');
     this.fetch = fetchImpl;
     this.githubToken = githubToken;
     this.giteeToken = giteeToken;
     this.report = onProgress;
     this.upload = uploadImpl;
+    this.uploadTimeoutMs = uploadTimeoutMs;
   }
   async requestWithReadRetries({provider, scope, method, url, options, timeout, transport = this.fetch}) {
     // One deadline per request/redirect hop, including every connect attempt.
@@ -336,7 +338,7 @@ export class MirrorHttp {
       if (provider === 'gitee' && token) body.set('access_token', token);
     }
     else if (data !== undefined) {body = new URLSearchParams(Object.entries(data).map(([key, value]) => [key, String(value)])); headers['Content-Type'] = 'application/x-www-form-urlencoded'}
-    const timeout = data instanceof FormData ? UPLOAD_TIMEOUT_MS : API_TIMEOUT_MS;
+    const timeout = data instanceof FormData ? this.uploadTimeoutMs : API_TIMEOUT_MS;
     const transport = provider === 'gitee' && data instanceof FormData ? this.upload : this.fetch;
     const response = await this.requestWithReadRetries({provider, scope: 'API', method, url, timeout, transport,
       options: {headers, body, redirect: 'manual'}});

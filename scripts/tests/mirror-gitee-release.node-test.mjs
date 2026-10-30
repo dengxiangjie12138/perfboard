@@ -272,7 +272,7 @@ test('draft GitHub releases are not mirrored', async t => {
   assert.equal(remote.calls.filter(call => call.method !== 'GET').length, 0);
 });
 
-test('large attachment uploads have a bounded ten-minute deadline while metadata keeps its three-minute deadline', async t => {
+test('large attachment uploads have a bounded fifteen-minute deadline while metadata keeps its three-minute deadline', async t => {
   const timeouts = [];
   t.mock.method(AbortSignal, 'timeout', duration => {
     timeouts.push(duration);
@@ -283,13 +283,18 @@ test('large attachment uploads have a bounded ten-minute deadline while metadata
   const form = new FormData();
   form.append('file', new Blob(['synthetic installer']), 'fixture.exe');
   await http.api('gitee', 'POST', '/releases/1/attach_files', form);
-  assert.deepEqual(timeouts, [180_000, 600_000]);
+  const shorter = new MirrorHttp({uploadImpl: async () => json({}), uploadTimeoutMs: 600_000});
+  await shorter.api('gitee', 'POST', '/releases/1/attach_files', form);
+  assert.deepEqual(timeouts, [180_000, 900_000, 600_000]);
+  for (const uploadTimeoutMs of [0, 900_001, Infinity, NaN, '600000']) {
+    assert.throws(() => new MirrorHttp({uploadTimeoutMs}), /Invalid bounded attachment deadline/);
+  }
 });
 
 test('upload failures explain timeout or network categories without exposing raw errors or retrying ambiguous POSTs', async () => {
   const form = new FormData();
   form.append('file', new Blob(['synthetic installer']), 'fixture.exe');
-  for (const [name, code, expected] of [['TimeoutError', undefined, /timed out.*request limit 600s/], ['TypeError', 'ECONNRESET', /request failed.*ECONNRESET.*request limit 600s/]]) {
+  for (const [name, code, expected] of [['TimeoutError', undefined, /timed out.*request limit 900s/], ['TypeError', 'ECONNRESET', /request failed.*ECONNRESET.*request limit 900s/]]) {
     let requests = 0;
     const error = new Error('fake-gitee-token https://private.invalid/path?token=secret');
     error.name = name;
@@ -311,7 +316,7 @@ test('CLI progress can identify each upload and verified public download without
   const result = await mirrorRelease({...remote.options(await directory(t)), onProgress: message => messages.push(message)});
   assert.equal(messages.filter(message => message.startsWith('Uploading Gitee attachment ')).length, 4);
   assert.equal(messages.filter(message => message.startsWith('Verified Gitee attachment ')).length, 4);
-  assert.ok(messages.some(message => message.includes('Perfboard_0.1.2_x64-setup.exe') && message.includes('request limit 600s')));
+  assert.ok(messages.some(message => message.includes('Perfboard_0.1.2_x64-setup.exe') && message.includes('request limit 900s')));
   assert.ok(messages.every(message => !message.includes('fake-gh-token') && !message.includes('fake-gitee-token') && !message.includes('signature=') && !message.includes('https://')));
   assert.equal(result.status, 'mirrored');
 });
@@ -583,7 +588,7 @@ test('production upload defaults select the verified native multipart IPv4 path 
   await uploadGiteeCurl(uploadUrl, nativeOptions(), fixture);
   const {args, chunks} = fixture.calls[0];
   assert.ok(args.includes('--ipv4'));
-  assert.equal(args[args.indexOf('--max-time') + 1], '590');
+  assert.equal(args[args.indexOf('--max-time') + 1], '890');
   assert.ok(args.includes('--form') && args.includes('access_token=<-'));
   assert.ok(!args.includes('--data-binary') && !args.some(value => value.startsWith('Content-Length:') || value.startsWith('Content-Type:')));
   assert.equal(Buffer.concat(chunks).toString(), 'fake-gitee-token');
